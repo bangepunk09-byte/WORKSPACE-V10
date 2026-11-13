@@ -15,11 +15,14 @@ function RichText({ text, mentionIds }) {
   const { userMap } = useApp();
   const names = (mentionIds || []).map((id) => userMap[id]?.name).filter(Boolean);
   const tag = "(?<![\\p{L}\\p{N}_#])#[\\p{L}\\p{N}_]{1,40}";
-  const rx = new RegExp(names.length ? `(@(?:${names.map(esc).join("|")})|${tag})` : `(${tag})`, "gu");
-  return text.split(rx).map((part, i) => {
-    if (!(i % 2)) return part;
+  const urlPattern = "https?://[^\\s]+";
+  const rx = new RegExp(names.length ? `(@(?:${names.map(esc).join("|")})|${tag}|${urlPattern})` : `(${tag}|${urlPattern})`, "gu");
+  return String(text || "").split(rx).map((part, i) => {
+    if (!part) return null;
     if (part.startsWith("#")) return <Link key={i} to={`/beranda?tag=${encodeURIComponent(part.slice(1).toLowerCase())}`} className="font-semibold text-sky-600 hover:underline dark:text-sky-400" data-testid={`hashtag-${part.slice(1).toLowerCase()}`}>{part}</Link>;
-    return <span key={i} className="font-semibold text-brand">{part}</span>;
+    if (/^https?:\/\//.test(part)) return <a key={i} href={part} target="_blank" rel="noopener noreferrer" className="text-brand underline hover:opacity-80 break-all">{part}</a>;
+    if (part.startsWith("@")) return <span key={i} className="font-semibold text-brand">{part}</span>;
+    return part;
   });
 }
 
@@ -204,7 +207,7 @@ function Composer({ parentId, onPosted, placeholder, compact = false }) {
               className={`btn-accent rounded-full font-semibold disabled:opacity-40 ${compact ? "h-8 px-4 text-xs" : "h-9 px-5 text-sm"}`}
               data-testid="post-submit-btn"
             >
-              {parentId ? "Balas" : t("beranda_post_btn")}
+              {parentId ? t("beranda_reply_btn", "Balas") : t("beranda_post_btn", "Posting")}
             </button>
           </div>
         </div>
@@ -834,7 +837,7 @@ export function hydratePostsCache(posts, trending) {
 }
 
 function Trending({ compact }) {
-  const { subscribe } = useApp();
+  const { subscribe, t } = useApp();
   const [items, setItems] = useState(TRENDING_CACHE);
   const [params] = useSearchParams();
   const active = params.get("tag");
@@ -888,9 +891,9 @@ function Trending({ compact }) {
     <div className="card p-4" data-testid="trending-panel">
       <h3 className="flex items-center gap-2 font-bold text-ink">
         <TrendingUp size={17} className="text-brand" />
-        Trending
+        {t("beranda_trending_title", "Trending")}
       </h3>
-      <p className="mb-3 text-xs text-sub">Hashtag paling ramai 7 hari terakhir</p>
+      <p className="mb-3 text-xs text-sub">{t("beranda_trending_subtitle", "Hashtag paling ramai 7 hari terakhir")}</p>
 
       {!displayItems.length ? (
         <p className="text-sm text-sub" data-testid="trending-empty">
@@ -922,7 +925,7 @@ function Trending({ compact }) {
 }
 
 function Feed() {
-  const { me, subscribe } = useApp();
+  const { me, subscribe, t } = useApp();
   const [params, setParams] = useSearchParams();
   const tag = params.get("tag") || "";
   const [posts, setPosts] = useState(() =>
@@ -1083,7 +1086,7 @@ function Feed() {
 
   return (
     <>
-      <PageHeader icon={Newspaper} title="Beranda" subtitle="Tempat berbagi kabar, ide, dan obrolan santai bareng semua orang di Internal." />
+      <PageHeader icon={Newspaper} title={t("beranda_title", "Beranda")} subtitle={t("beranda_subtitle", "Tempat berbagi kabar, ide, dan obrolan santai bareng semua orang di Internal.")} />
       <div className="space-y-4">
         <div className="lg:hidden"><Trending compact /></div>
         {tag && (
@@ -1125,7 +1128,7 @@ function Feed() {
         )}
         {posts?.length > 0 && more && (
           <button onClick={older} className="w-full py-3 text-sm font-semibold text-brand hover:underline" data-testid="feed-load-more">
-            Muat lebih banyak
+            {t("beranda_load_more", "Muat lebih banyak")}
           </button>
         )}
       </div>

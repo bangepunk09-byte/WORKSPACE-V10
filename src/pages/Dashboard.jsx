@@ -327,29 +327,27 @@ export default function Dashboard() {
   );
 
   const handleSaveDashboardShortcut = (payload) => {
-    setDriveShortcuts((prev) => {
-      const exists = prev.some((s) => s.id === payload.id);
-      let next;
-      if (exists) {
-        const updated = { ...payload, updated_at: new Date().toISOString() };
-        next = prev.map((s) => (s.id === payload.id ? updated : s));
-        api.patch(`/drive-shortcuts/${payload.id}`, updated).catch((e) => toast.error(errMsg(e)));
-        toast.success(`Shortcut "${payload.name}" berhasil diperbarui`);
-      } else {
-        const created = {
-          ...payload,
-          id: `drv_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`,
-          created_by: me?.user_id || "user_admin1",
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        };
-        next = [created, ...prev];
-        api.post("/drive-shortcuts", created).catch((e) => toast.error(errMsg(e)));
-        toast.success(`Shortcut folder "${created.name}" berhasil ditambahkan`);
-      }
-      setCachedDriveShortcuts(next);
-      return next;
-    });
+    const exists = driveShortcuts.some((s) => s.id === payload.id);
+    let next;
+    if (exists) {
+      const updated = { ...payload, updated_at: new Date().toISOString() };
+      next = driveShortcuts.map((s) => (s.id === payload.id ? updated : s));
+      api.patch(`/drive-shortcuts/${payload.id}`, updated).catch((e) => toast.error(errMsg(e)));
+      toast.success(`Shortcut "${payload.name}" berhasil diperbarui`);
+    } else {
+      const created = {
+        ...payload,
+        id: `drv_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`,
+        created_by: me?.user_id || "user_admin1",
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      };
+      next = [created, ...driveShortcuts];
+      api.post("/drive-shortcuts", created).catch((e) => toast.error(errMsg(e)));
+      toast.success(`Shortcut folder "${created.name}" berhasil ditambahkan`);
+    }
+    setDriveShortcuts(next);
+    setCachedDriveShortcuts(next);
   };
 
   const handleSaveDashboardAccess = (shortcutId, patch) => {
@@ -395,9 +393,13 @@ export default function Dashboard() {
 
   const layer = bgLayer(prefs.background, prefs.background?.file_id ? fileUrl(prefs.background.file_id) : null);
   const hour = new Date().getHours();
-  const greet = lang === "en"
-    ? (hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening")
-    : (hour < 11 ? "Selamat pagi" : hour < 15 ? "Selamat siang" : hour < 18 ? "Selamat sore" : "Selamat malam");
+  const greet = hour < 12
+    ? t("dash_greeting_morning", "Good morning")
+    : hour < 17
+    ? t("dash_greeting_afternoon", "Good afternoon")
+    : hour < 21
+    ? t("dash_greeting_evening", "Good evening")
+    : t("dash_greeting_night", "Good night");
 
   // Data for Column 1: Meetings
   const displayMeetings = meetings.slice(0, 3);
@@ -469,13 +471,13 @@ export default function Dashboard() {
         <div className={`flex items-center justify-between border-b border-slate-100 dark:border-slate-800 ${densityStyles.cardHeader}`}>
           <span className="inline-flex items-center gap-2 rounded-full border border-emerald-300 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/40 px-3.5 py-1 text-xs font-bold text-emerald-700 dark:text-emerald-300 shadow-xs">
             <Video size={14} className="text-emerald-600 dark:text-emerald-400" />
-            <span>Jadwal Rapat Mendatang</span>
+            <span>{t("dash_meetings_title", "Jadwal Rapat Mendatang")}</span>
           </span>
           <Link
             to="/schedule"
             className="inline-flex items-center gap-1 text-xs font-bold text-sky-600 hover:text-sky-700 dark:text-sky-400 transition-colors"
           >
-            Lihat Semua <ChevronRight size={14} />
+            {t("dash_view_all", "Lihat Semua")} <ChevronRight size={14} />
           </Link>
         </div>
 
@@ -543,13 +545,13 @@ export default function Dashboard() {
           onClick={() => navigate("/schedule")}
           className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 transition-colors py-1"
         >
-          <Plus size={15} /> Jadwal Baru
+          <Plus size={15} /> {t("dash_new_schedule", "Jadwal Baru")}
         </button>
         <Link
           to="/schedule"
           className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-700 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white transition-colors py-1"
         >
-          <CalendarDays size={15} /> Buka Kalender
+          <CalendarDays size={15} /> {t("dash_open_calendar", "Buka Kalender")}
         </Link>
       </div>
     </div>
@@ -566,13 +568,13 @@ export default function Dashboard() {
         <div className={`flex items-center justify-between border-b border-slate-100 dark:border-slate-800 ${densityStyles.cardHeader}`}>
           <span className="inline-flex items-center gap-2 rounded-full border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 px-3.5 py-1 text-xs font-bold text-amber-700 dark:text-amber-300 shadow-xs">
             <CheckSquare size={14} className="text-amber-600 dark:text-amber-400" />
-            <span>Tugas Prioritas Hari Ini</span>
+            <span>{t("dash_tasks_title", "Tugas Prioritas Hari Ini")}</span>
           </span>
           <Link
             to="/tasks?kanban=1"
             className="inline-flex items-center gap-1 text-xs font-bold text-rose-600 hover:text-rose-700 dark:text-rose-400 transition-colors"
           >
-            Lihat Kanban <ChevronRight size={14} />
+            {t("dash_view_kanban", "Lihat Kanban")} <ChevronRight size={14} />
           </Link>
         </div>
 
@@ -659,7 +661,7 @@ export default function Dashboard() {
           className="flex h-12 w-full items-center justify-center gap-2 rounded-full border border-slate-200/90 dark:border-slate-700 bg-surface px-4 text-xs sm:text-sm font-bold text-sub hover:text-ink hover:border-slate-400 dark:hover:border-slate-500 shadow-xs transition-all hover:scale-[1.01] active:scale-[0.99]"
         >
           <Plus size={15} className="text-rose-500" />
-          <span>Tambah Item Tugas Baru</span>
+          <span>{t("dash_add_task_item", "Tambah Item Tugas Baru")}</span>
         </button>
       </div>
     </div>
@@ -676,13 +678,13 @@ export default function Dashboard() {
         <div className={`flex items-center justify-between border-b border-slate-100 dark:border-slate-800 ${densityStyles.cardHeader}`}>
           <span className="inline-flex items-center gap-2 rounded-full border border-purple-300 dark:border-purple-800 bg-purple-50 dark:bg-purple-950/40 px-3.5 py-1 text-xs font-bold text-purple-700 dark:text-purple-300 shadow-xs">
             <MessageSquare size={14} className="text-purple-600 dark:text-purple-400" />
-            <span>Pesan & Diskusi Tim</span>
+            <span>{t("dash_messages_title", "Pesan & Diskusi Tim")}</span>
           </span>
           <Link
             to="/beranda"
             className="inline-flex items-center gap-1 text-xs font-bold text-rose-600 hover:text-rose-700 dark:text-rose-400 transition-colors"
           >
-            Buka Feed <ChevronRight size={14} />
+            {t("dash_view_feed", "Buka Feed")} <ChevronRight size={14} />
           </Link>
         </div>
 
@@ -779,7 +781,7 @@ export default function Dashboard() {
           className="btn-accent inline-flex h-12 w-full items-center justify-center gap-2 rounded-full text-white font-bold text-sm shadow-md shadow-rose-500/25 transition-all hover:scale-[1.01] active:scale-[0.99]"
         >
           <MessageSquare size={16} className="text-white fill-white" />
-          <span>Buka Obrolan Tim</span>
+          <span>{t("dash_open_chat", "Buka Obrolan Tim")}</span>
         </Link>
       </div>
     </div>
@@ -895,7 +897,7 @@ export default function Dashboard() {
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="inline-flex items-center gap-2 rounded-full border border-rose-200 dark:border-rose-800 bg-rose-50 dark:bg-rose-950/40 px-3.5 py-1 text-xs font-bold text-rose-700 dark:text-rose-300">
                     <FolderKanban size={14} className="text-brand" />
-                    <span>Direktori Shortcut Google Drive</span>
+                    <span>{t("dash_drive_title", "Direktori Shortcut Google Drive")}</span>
                   </span>
                   <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 px-3 py-1 text-xs font-bold text-emerald-700 dark:text-emerald-300">
                     <ShieldCheck size={13} /> Hanya Menampilkan Folder Akses Anda ({accessibleDashboardShortcuts.length})
@@ -916,14 +918,14 @@ export default function Dashboard() {
                   className="btn-accent inline-flex h-10 items-center gap-1.5 rounded-full px-4 text-xs sm:text-sm font-bold text-white shadow-xs"
                   data-testid="dashboard-add-drive-shortcut-btn"
                 >
-                  <Plus size={15} /> Tambah Shortcut
+                  <Plus size={15} /> {t("dash_drive_add", "Tambah Shortcut")}
                 </button>
                 <Link
                   to="/directory"
                   className="inline-flex h-10 items-center gap-1 rounded-full border bg-surface px-4 text-xs sm:text-sm font-bold text-sub hover:text-ink transition-colors"
                   data-testid="dashboard-open-directory-link"
                 >
-                  Kelola Direktori <ChevronRight size={14} />
+                  {t("dash_drive_manage", "Kelola Direktori")} <ChevronRight size={14} />
                 </Link>
               </div>
             </div>
@@ -1055,7 +1057,7 @@ export default function Dashboard() {
                           rel="noopener noreferrer"
                           className="btn-accent inline-flex h-9 items-center gap-1.5 rounded-full px-3.5 text-xs font-bold text-white shadow-xs shrink-0"
                         >
-                          <span>Buka Folder</span>
+                          <span>{t("dash_drive_open", "Buka Folder")}</span>
                           <ExternalLink size={12} />
                         </a>
                       </div>

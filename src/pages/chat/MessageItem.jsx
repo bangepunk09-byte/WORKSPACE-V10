@@ -43,17 +43,11 @@ function TaskPreview({ m }) {
   const can = true; // In group chat, team members can participate in approval
 
   const decide = async (decision) => {
-    let note = "";
-    if (decision === "revise") {
-      const p = window.prompt("Catatan revisi:", "");
-      if (p === null) return;
-      note = p;
-    }
     setBusy(true);
     try {
       const res = await api.post(`/tasks/${t.id}/approval`, {
         decision,
-        note,
+        note: "",
         message_id: m.id
       });
       if (decision === "approve") {
@@ -64,7 +58,17 @@ function TaskPreview({ m }) {
           toast.success("Persetujuan dicatat (50% - 1/2). Menunggu 1 orang lagi.");
         }
       } else {
-        toast.info("Catatan revisi terkirim. Task dikembalikan ke In Progress.");
+        const prefillText = `Revisi ${t.number_str || `T-${t.number || ""}`} (${t.title || ""}): `;
+        window.dispatchEvent(
+          new CustomEvent("circle:composer-prefill", {
+            detail: {
+              conversationId: m.conversation_id,
+              text: prefillText,
+              replyMsg: m
+            }
+          })
+        );
+        toast.info("Silakan ketik catatan revisi langsung di kolom chat");
       }
     } catch (e) {
       toast.error(errMsg(e));

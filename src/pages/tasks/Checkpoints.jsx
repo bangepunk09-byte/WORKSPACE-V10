@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { MessageSquare, AlertTriangle, X, Plus, CheckCircle2, RotateCcw, Flag, Layers, Sparkles } from "lucide-react";
+import { MessageSquare, AlertTriangle, X, Plus, CheckCircle2, RotateCcw, Flag, Layers, Sparkles, Bell } from "lucide-react";
 import { toast } from "sonner";
 import { api, errMsg } from "../../lib/api";
 import { useApp } from "../../context/AppContext";
@@ -100,11 +100,12 @@ export default function Checkpoints({ t, ro, patch, reload, members }) {
   const { userMap, me } = useApp();
   const rawCps = t.checkpoints || [];
   const cps = rawCps.map((c, i) => {
-    if (typeof c === "string") return { id: `cp_${i}`, title: c, assignee_id: null, done: false };
+    if (typeof c === "string") return { id: `cp_${i}`, title: c, assignee_id: null, deadline: "", done: false };
     return {
       id: c.id || `cp_${i}`,
       title: c.title || "",
       assignee_id: c.assignee_id || null,
+      deadline: c.deadline || "",
       done: !!c.done,
       done_at: c.done_at,
       done_by: c.done_by,
@@ -114,6 +115,7 @@ export default function Checkpoints({ t, ro, patch, reload, members }) {
 
   const [title, setTitle] = useState("");
   const [pic, setPic] = useState(null);
+  const [deadline, setDeadline] = useState("");
   const [open, setOpen] = useState(null);
 
   const save = (list, customToast) => {
@@ -129,7 +131,6 @@ export default function Checkpoints({ t, ro, patch, reload, members }) {
     const targetIdx = nextList.findIndex((c) => c.id === id);
 
     let notifToast = undefined;
-    // Case 1: A checkpoint was just marked done, advancing the active turn to the next checkpoint with a PIC
     if (ch.done === true && nextActiveIdx !== -1 && nextActiveIdx !== prevActiveIdx) {
       const reachedCp = nextList[nextActiveIdx];
       if (reachedCp?.assignee_id) {
@@ -137,7 +138,6 @@ export default function Checkpoints({ t, ro, patch, reload, members }) {
         notifToast = `Notifikasi dikirim ke ${picName}: "Task "${t.title}" sudah siap dikerjakan, Semangat ya.."`;
       }
     }
-    // Case 2: A PIC was just assigned to the currently active checkpoint
     if (ch.assignee_id && targetIdx === nextActiveIdx && !nextList[targetIdx]?.done) {
       const picName = userMap[ch.assignee_id]?.name || "PIC";
       notifToast = `Notifikasi dikirim ke ${picName}: "Task "${t.title}" sudah siap dikerjakan, Semangat ya.."`;
@@ -164,6 +164,7 @@ export default function Checkpoints({ t, ro, patch, reload, members }) {
       id: `cp_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
       title: title.trim(),
       assignee_id: pic,
+      deadline: deadline || "",
       done: false
     };
     const notifToast =
@@ -173,6 +174,7 @@ export default function Checkpoints({ t, ro, patch, reload, members }) {
     save([...cps, newCp], notifToast);
     setTitle("");
     setPic(null);
+    setDeadline("");
   };
 
   const presets = [
@@ -195,6 +197,7 @@ export default function Checkpoints({ t, ro, patch, reload, members }) {
       id: `cp_preset_${Date.now()}_${idx}`,
       title: itemTitle,
       assignee_id: null,
+      deadline: "",
       done: false
     }));
     save([...cps, ...newItems]);
@@ -216,7 +219,7 @@ export default function Checkpoints({ t, ro, patch, reload, members }) {
             {computedProgress}% Selesai
           </span>
           <span className="text-xs font-semibold text-sub">
-            ({doneCount}/{cps.length} Checkpoint)
+            ({doneCount}/{cps.length} Tahap)
           </span>
         </div>
       </div>
@@ -239,44 +242,49 @@ export default function Checkpoints({ t, ro, patch, reload, members }) {
                 data-testid={`preset-detail-btn-${p.label.toLowerCase().replace(/[^a-z0-9]/g, "-")}`}
               >
                 <span>{p.label}</span>
-                <span className="text-[10px] text-sub font-normal">+4 checkpoint</span>
+                <span className="text-[10px] text-sub font-normal">+4 tahap</span>
               </button>
             ))}
           </div>
         </div>
       )}
 
-      {/* List of Checkpoints */}
-      <div className="mt-3 space-y-2.5">
+      {/* List of Checkpoints — 1 clean line per checkpoint */}
+      <div className="mt-3 space-y-1.5">
         {cps.map((c, i) => {
           const cm = (t.comments || []).filter((x) => x.checkpoint_id === c.id);
           const issues = cm.filter((x) => x.kind === "issue" && !x.resolved).length;
           const isCurrentTurn = !c.done && i === activeIdx;
           const picUser = c.assignee_id ? userMap[c.assignee_id] : null;
+          const isCpOverdue = !c.done && c.deadline && new Date(`${String(c.deadline).slice(0, 10)}T23:59:59`) < new Date();
+          const doneTitle = c.done && c.done_at
+            ? `Selesai ${rel(c.done_at)}${c.done_by && userMap[c.done_by] ? ` oleh ${userMap[c.done_by].name}` : ""}`
+            : "Tandai selesai";
 
           return (
             <div
               key={c.id}
-              className={`overflow-hidden rounded-2xl border transition-all ${
+              className={`overflow-hidden rounded-xl border transition-all ${
                 c.done
                   ? "border-emerald-200 bg-emerald-50/40 dark:border-emerald-900/50 dark:bg-emerald-950/20"
                   : issues
                   ? "border-rose-300 bg-rose-50/40 dark:border-rose-900/50 dark:bg-rose-950/20"
                   : isCurrentTurn
-                  ? "border-sky-300 bg-sky-50/35 shadow-xs dark:border-sky-800/70 dark:bg-sky-950/20"
+                  ? "border-sky-300 bg-sky-50/35 dark:border-sky-800/70 dark:bg-sky-950/20"
                   : "border-slate-200 bg-surface dark:border-slate-800"
               }`}
               data-testid={`checkpoint-${c.id}`}
             >
-              <div className="flex flex-wrap items-center gap-2.5 px-3 py-2.5 sm:flex-nowrap">
+              <div className="flex flex-nowrap items-center gap-1.5 px-2.5 py-1.5 overflow-x-auto no-scrollbar">
                 <span
                   className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full font-bold text-[10px] ${
                     c.done
                       ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900 dark:text-emerald-200"
                       : isCurrentTurn
-                      ? "bg-sky-500 text-white shadow-xs"
+                      ? "bg-sky-500 text-white"
                       : "bg-surface2 text-sub"
                   }`}
+                  title={isCurrentTurn ? "Tahap aktif saat ini" : `Tahap ${i + 1}`}
                 >
                   {i + 1}
                 </span>
@@ -294,20 +302,21 @@ export default function Checkpoints({ t, ro, patch, reload, members }) {
                       done_by: isNowDone ? me?.user_id : null
                     });
                   }}
-                  className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full border transition-all cursor-pointer ${
+                  className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition-all cursor-pointer ${
                     c.done
-                      ? "border-emerald-500 bg-emerald-500 text-white shadow-xs"
+                      ? "border-emerald-500 bg-emerald-500 text-white"
                       : isCurrentTurn
                       ? "border-sky-400 bg-surface hover:border-emerald-500 hover:bg-emerald-50 dark:border-sky-600"
-                      : "border-slate-300 bg-surface hover:border-emerald-500 hover:bg-emerald-50 dark:border-slate-700 dark:hover:bg-emerald-950/30"
+                      : "border-slate-300 bg-surface hover:border-emerald-500 hover:bg-emerald-50 dark:border-slate-700"
                   }`}
+                  title={doneTitle}
                   aria-label="Conteng selesai checkpoint"
                   data-testid={`checkpoint-done-${c.id}`}
                 >
                   {c.done ? (
-                    <CheckCircle2 size={16} className="stroke-[2.5]" />
+                    <CheckCircle2 size={13} className="stroke-[2.5]" />
                   ) : (
-                    <span className={`h-2 w-2 rounded-full ${isCurrentTurn ? "bg-sky-500" : "bg-slate-300 dark:bg-slate-600"}`} />
+                    <span className={`h-1.5 w-1.5 rounded-full ${isCurrentTurn ? "bg-sky-500" : "bg-slate-300 dark:bg-slate-600"}`} />
                   )}
                 </button>
 
@@ -316,40 +325,69 @@ export default function Checkpoints({ t, ro, patch, reload, members }) {
                   key={c.title}
                   disabled={ro}
                   onBlur={(e) => e.target.value.trim() && e.target.value !== c.title && edit(c.id, { title: e.target.value })}
-                  className={`min-w-0 flex-1 bg-transparent text-sm font-semibold outline-none ${
+                  className={`min-w-[110px] flex-1 bg-transparent text-xs sm:text-[13px] font-semibold outline-none truncate ${
                     c.done ? "text-slate-400 dark:text-slate-500 line-through" : "text-slate-800 dark:text-slate-100"
                   }`}
                   data-testid={`checkpoint-title-${c.id}`}
                 />
 
-                <div className="w-full sm:w-40 shrink-0">
+                {/* Checkpoint Deadline */}
+                <input
+                  type="date"
+                  value={c.deadline ? String(c.deadline).slice(0, 10) : ""}
+                  disabled={ro}
+                  onChange={(e) => edit(c.id, { deadline: e.target.value || "" })}
+                  title="Deadline checkpoint"
+                  className={`h-7 w-[116px] shrink-0 rounded-lg border px-1.5 text-[11px] font-medium outline-none ${
+                    isCpOverdue
+                      ? "border-rose-300 bg-rose-50 text-rose-700 dark:border-rose-800 dark:bg-rose-950/30 dark:text-rose-300"
+                      : "bg-surface2 text-ink"
+                  }`}
+                  data-testid={`checkpoint-deadline-${c.id}`}
+                />
+
+                {/* Checkpoint PIC */}
+                <div className="w-[120px] sm:w-[136px] shrink-0">
                   {ro ? (
-                    <span className="text-xs text-sub truncate block">{picUser?.name || "Tanpa PIC"}</span>
+                    <span className="text-[11px] text-sub truncate block">{picUser?.name || "Tanpa PIC"}</span>
                   ) : (
                     <UserSelect
                       value={c.assignee_id}
                       ids={members}
                       onChange={(v) => edit(c.id, { assignee_id: v })}
                       placeholder="PIC"
-                      className="h-8 w-full rounded-xl border bg-surface2 px-3 text-xs font-semibold outline-none"
+                      className="h-7 w-full rounded-lg border bg-surface2 pl-2 pr-6 text-[11px] font-semibold outline-none truncate"
                       testid={`checkpoint-pic-${c.id}`}
                     />
                   )}
                 </div>
 
+                {isCurrentTurn && picUser && !ro && (
+                  <button
+                    type="button"
+                    onClick={() => pingPic(c)}
+                    className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-sky-200 bg-sky-50 text-sky-600 hover:bg-sky-100 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-300 transition-colors cursor-pointer"
+                    title={`Kirim notif siap kerja ke ${picUser.name}`}
+                    data-testid={`checkpoint-notify-${c.id}`}
+                  >
+                    <Bell size={12} />
+                  </button>
+                )}
+
                 <button
                   type="button"
                   onClick={() => setOpen(open === c.id ? null : c.id)}
-                  className={`flex h-8 shrink-0 items-center gap-1 rounded-full border px-2.5 text-xs font-semibold transition-colors cursor-pointer ${
+                  className={`flex h-7 shrink-0 items-center gap-1 rounded-lg border px-2 text-[11px] font-semibold transition-colors cursor-pointer ${
                     open === c.id ? "bg-ink text-[var(--c-surface)]" : "bg-surface text-sub hover:bg-surface2"
                   }`}
+                  title="Komentar & kendala checkpoint"
                   data-testid={`checkpoint-discuss-${c.id}`}
                 >
-                  <MessageSquare size={12} />
+                  <MessageSquare size={11} />
                   {cm.length}
                   {issues > 0 && (
                     <span className="flex items-center gap-0.5 text-rose-500 font-bold">
-                      <AlertTriangle size={12} />
+                      <AlertTriangle size={11} />
                       {issues}
                     </span>
                   )}
@@ -359,44 +397,15 @@ export default function Checkpoints({ t, ro, patch, reload, members }) {
                   <button
                     type="button"
                     onClick={() => save(cps.filter((x) => x.id !== c.id))}
-                    className="text-sub hover:text-rose-500 p-1 transition-colors cursor-pointer shrink-0"
+                    className="flex h-7 w-6 shrink-0 items-center justify-center rounded-lg text-sub hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-colors cursor-pointer"
                     aria-label="Hapus checkpoint"
+                    title="Hapus checkpoint"
                     data-testid={`checkpoint-remove-${c.id}`}
                   >
-                    <X size={15} />
+                    <X size={13} />
                   </button>
                 )}
               </div>
-
-              {c.done && c.done_at && (
-                <p className="-mt-1 pl-[76px] pr-3 pb-2.5 text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
-                  ✓ Selesai {rel(c.done_at)}{c.done_by && userMap[c.done_by] ? ` oleh ${userMap[c.done_by].name}` : ""}
-                </p>
-              )}
-
-              {isCurrentTurn && (
-                <div className="-mt-1 flex flex-wrap items-center justify-between gap-2 pl-[76px] pr-3 pb-2.5 text-[11px]">
-                  {picUser ? (
-                    <span className="font-semibold text-sky-700 dark:text-sky-300">
-                      ⚡ Giliran <b>{picUser.name}</b> — Task "{t.title}" sudah siap dikerjakan, Semangat ya..
-                    </span>
-                  ) : (
-                    <span className="font-medium text-sub">
-                      ⚡ Tahap aktif saat ini — Pilih PIC untuk mengirim notifikasi tugas siap dikerjakan
-                    </span>
-                  )}
-                  {picUser && !ro && (
-                    <button
-                      type="button"
-                      onClick={() => pingPic(c)}
-                      className="rounded-full bg-sky-500/15 px-2.5 py-0.5 text-[10px] font-bold text-sky-700 hover:bg-sky-500/25 dark:text-sky-300 transition-colors cursor-pointer"
-                      data-testid={`checkpoint-notify-${c.id}`}
-                    >
-                      Kirim Ulang Notif
-                    </button>
-                  )}
-                </div>
-              )}
 
               {open === c.id && <Thread t={t} cp={c} reload={reload} />}
             </div>
@@ -404,24 +413,40 @@ export default function Checkpoints({ t, ro, patch, reload, members }) {
         })}
       </div>
 
+      {/* Add new checkpoint — clean 1-line row */}
       {!ro && (
-        <div className="mt-3 flex flex-wrap gap-2 sm:flex-nowrap">
+        <div className="mt-3 flex flex-nowrap items-center gap-1.5 overflow-x-auto no-scrollbar">
           <input
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), add())}
-            placeholder="Tambah checkpoint baru (mis. Script, Editing, Revisi…)"
-            className="h-10 min-w-0 flex-1 rounded-xl border bg-surface2 px-3 text-xs outline-none focus:ring-1 focus:ring-brand"
+            placeholder="Tambah checkpoint baru…"
+            className="h-9 min-w-[120px] flex-1 rounded-xl border bg-surface2 px-3 text-xs outline-none focus:ring-1 focus:ring-brand"
             data-testid="checkpoint-new-title"
           />
-          <div className="w-full sm:w-40 shrink-0">
-            <UserSelect value={pic} ids={members} onChange={setPic} placeholder="PIC" testid="checkpoint-new-pic" />
+          <input
+            type="date"
+            value={deadline}
+            onChange={(e) => setDeadline(e.target.value)}
+            title="Deadline checkpoint"
+            className="h-9 w-[118px] shrink-0 rounded-xl border bg-surface2 px-2 text-[11px] font-medium outline-none"
+            data-testid="checkpoint-new-deadline"
+          />
+          <div className="w-[120px] sm:w-[136px] shrink-0">
+            <UserSelect
+              value={pic}
+              ids={members}
+              onChange={setPic}
+              placeholder="PIC"
+              className="h-9 w-full rounded-xl border bg-surface2 pl-2.5 pr-7 text-xs font-semibold outline-none truncate"
+              testid="checkpoint-new-pic"
+            />
           </div>
           <button
             type="button"
             onClick={add}
             disabled={!title.trim()}
-            className="btn-accent flex h-10 items-center gap-1 px-4 text-xs font-semibold disabled:opacity-40 shrink-0 cursor-pointer"
+            className="btn-accent flex h-9 items-center gap-1 px-3.5 text-xs font-semibold disabled:opacity-40 shrink-0 cursor-pointer"
             data-testid="checkpoint-add-btn"
           >
             <Plus size={14} />
@@ -432,4 +457,5 @@ export default function Checkpoints({ t, ro, patch, reload, members }) {
     </section>
   );
 }
+
 

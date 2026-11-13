@@ -10,6 +10,11 @@ export const SCOPES = [
   'https://www.googleapis.com/auth/calendar.events',
 ];
 
+const loginProvider = new GoogleAuthProvider();
+loginProvider.addScope('email');
+loginProvider.addScope('profile');
+loginProvider.setCustomParameters({ prompt: 'select_account' });
+
 const provider = new GoogleAuthProvider();
 provider.addScope('email');
 provider.addScope('profile');
@@ -61,10 +66,10 @@ export const setManualGoogleAuth = (userObj = {}, token = null) => {
   return { user: manualConnectedUser, accessToken: tok };
 };
 
-export const googleSignIn = async () => {
+async function runPopupSignIn(targetProvider) {
   try {
     isSigningIn = true;
-    const result = await signInWithPopup(auth, provider);
+    const result = await signInWithPopup(auth, targetProvider);
     const credential = GoogleAuthProvider.credentialFromResult(result);
     const tok = credential?.accessToken || `firebase_token_${result.user?.uid || Date.now()}`;
     cachedAccessToken = tok;
@@ -84,7 +89,11 @@ export const googleSignIn = async () => {
   } finally {
     isSigningIn = false;
   }
-};
+}
+
+export const googleBasicSignIn = () => runPopupSignIn(loginProvider);
+
+export const googleSignIn = () => runPopupSignIn(provider);
 
 export const getAccessToken = async () => {
   if (cachedAccessToken) return cachedAccessToken;

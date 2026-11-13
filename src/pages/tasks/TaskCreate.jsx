@@ -56,6 +56,7 @@ export function toDeadline(date, time) {
 
 function CheckpointCreator({ checkpoints = [], onChange, members }) {
   const [title, setTitle] = useState("");
+  const [deadline, setDeadline] = useState("");
   const [pic, setPic] = useState(null);
 
   const presets = [
@@ -93,6 +94,7 @@ function CheckpointCreator({ checkpoints = [], onChange, members }) {
       id: `cp_preset_${Date.now()}_${idx}`,
       title: t,
       assignee_id: null,
+      deadline: "",
       done: false
     }));
     onChange([...checkpoints, ...newItems]);
@@ -106,10 +108,12 @@ function CheckpointCreator({ checkpoints = [], onChange, members }) {
         id: `cp_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
         title: title.trim(),
         assignee_id: pic || null,
+        deadline: deadline || "",
         done: false
       }
     ]);
     setTitle("");
+    setDeadline("");
     setPic(null);
   };
 
@@ -132,13 +136,13 @@ function CheckpointCreator({ checkpoints = [], onChange, members }) {
               data-testid={`preset-btn-${p.label.toLowerCase().replace(/[^a-z0-9]/g, "-")}`}
             >
               <span>{p.label}</span>
-              <span className="text-[10px] text-sub font-normal">+4 checkpoint</span>
+              <span className="text-[10px] text-sub font-normal">+4 tahap</span>
             </button>
           ))}
         </div>
       </div>
 
-      {/* Added Checkpoints List */}
+      {/* Added Checkpoints List — 1 line per checkpoint */}
       {checkpoints.length > 0 && (
         <div className="space-y-1.5 pt-1">
           <div className="flex items-center justify-between text-xs font-semibold text-sub">
@@ -151,19 +155,33 @@ function CheckpointCreator({ checkpoints = [], onChange, members }) {
               Hapus Semua
             </button>
           </div>
-          <div className="space-y-1.5 max-h-52 overflow-y-auto pr-1">
+          <div className="space-y-1.5 max-h-56 overflow-y-auto pr-0.5">
             {checkpoints.map((c, idx) => (
               <div
                 key={c.id || idx}
-                className="flex items-center gap-2 rounded-xl border border-slate-200 bg-surface px-3 py-2 text-xs dark:border-slate-800 shadow-sm"
+                className="flex flex-nowrap items-center gap-1.5 rounded-xl border border-slate-200 bg-surface px-2.5 py-1.5 text-xs dark:border-slate-800 shadow-xs overflow-x-auto no-scrollbar"
               >
                 <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-brand/10 font-bold text-brand text-[10px]">
                   {idx + 1}
                 </span>
-                <span className="flex-1 font-medium text-slate-800 dark:text-slate-200 truncate">
-                  {c.title}
-                </span>
-                <div className="w-32 shrink-0">
+                <input
+                  value={c.title}
+                  onChange={(e) =>
+                    onChange(checkpoints.map((item, i) => (i === idx ? { ...item, title: e.target.value } : item)))
+                  }
+                  className="min-w-[100px] flex-1 bg-transparent font-medium text-slate-800 dark:text-slate-200 outline-none truncate"
+                />
+                <input
+                  type="date"
+                  value={c.deadline ? String(c.deadline).slice(0, 10) : ""}
+                  onChange={(e) =>
+                    onChange(checkpoints.map((item, i) => (i === idx ? { ...item, deadline: e.target.value || "" } : item)))
+                  }
+                  title="Deadline checkpoint"
+                  className="h-7 w-[114px] shrink-0 rounded-lg border bg-surface2 px-1.5 text-[11px] font-medium outline-none"
+                  data-testid={`task-create-cp-deadline-${idx}`}
+                />
+                <div className="w-[120px] shrink-0">
                   <UserSelect
                     value={c.assignee_id}
                     ids={members}
@@ -175,13 +193,14 @@ function CheckpointCreator({ checkpoints = [], onChange, members }) {
                       )
                     }
                     placeholder="PIC"
+                    className="h-7 w-full rounded-lg border bg-surface2 pl-2 pr-6 text-[11px] font-semibold outline-none truncate"
                     testid={`task-create-cp-pic-${idx}`}
                   />
                 </div>
                 <button
                   type="button"
                   onClick={() => remove(c.id || idx)}
-                  className="text-sub hover:text-rose-500 p-0.5 transition-colors"
+                  className="text-sub hover:text-rose-500 p-0.5 transition-colors shrink-0"
                   aria-label="Remove checkpoint"
                 >
                   <X size={14} />
@@ -192,8 +211,8 @@ function CheckpointCreator({ checkpoints = [], onChange, members }) {
         </div>
       )}
 
-      {/* Input new checkpoint */}
-      <div className="flex flex-wrap gap-2 sm:flex-nowrap pt-1">
+      {/* Input new checkpoint — 1 line */}
+      <div className="flex flex-nowrap items-center gap-1.5 pt-1 overflow-x-auto no-scrollbar">
         <input
           value={title}
           onChange={(e) => setTitle(e.target.value)}
@@ -203,16 +222,25 @@ function CheckpointCreator({ checkpoints = [], onChange, members }) {
               add();
             }
           }}
-          placeholder="Tambah checkpoint, misal: Scripting, Visual, Shooting..."
-          className="h-10 min-w-0 flex-1 rounded-xl border bg-surface px-3 text-xs outline-none focus:ring-1 focus:ring-brand"
+          placeholder="Tambah checkpoint baru…"
+          className="h-9 min-w-[110px] flex-1 rounded-xl border bg-surface px-3 text-xs outline-none focus:ring-1 focus:ring-brand"
           data-testid="task-create-checkpoint-input"
         />
-        <div className="w-full sm:w-32">
+        <input
+          type="date"
+          value={deadline}
+          onChange={(e) => setDeadline(e.target.value)}
+          title="Deadline checkpoint"
+          className="h-9 w-[116px] shrink-0 rounded-xl border bg-surface px-2 text-[11px] font-medium outline-none"
+          data-testid="task-create-checkpoint-deadline"
+        />
+        <div className="w-[120px] shrink-0">
           <UserSelect
             value={pic}
             ids={members}
             onChange={setPic}
             placeholder="PIC"
+            className="h-9 w-full rounded-xl border bg-surface pl-2.5 pr-6 text-xs font-semibold outline-none truncate"
             testid="task-create-checkpoint-pic"
           />
         </div>
@@ -220,7 +248,7 @@ function CheckpointCreator({ checkpoints = [], onChange, members }) {
           type="button"
           onClick={add}
           disabled={!title.trim()}
-          className="btn-accent flex h-10 items-center gap-1 px-3 text-xs font-semibold disabled:opacity-40 shrink-0"
+          className="btn-accent flex h-9 items-center gap-1 px-3 text-xs font-semibold disabled:opacity-40 shrink-0"
           data-testid="task-create-checkpoint-add-btn"
         >
           <Plus size={13} />
@@ -260,8 +288,15 @@ export default function TaskCreate({ open, onOpenChange, preset, defaults, onCre
     }
   }, [open]); // eslint-disable-line
 
-  const boardMemberIds = boards.find((b) => b.id === f.board_id)?.member_ids || [];
-  const members = boardMemberIds.length > 0 ? boardMemberIds : humanUsers.map((u) => u.user_id);
+  const targetBoard = boards.find((b) => b.id === f.board_id);
+  const targetDept = String(targetBoard?.department || f.department || "").trim().toLowerCase();
+  const deptUserIds = targetDept
+    ? humanUsers.filter((u) => String(u.department || "").trim().toLowerCase() === targetDept).map((u) => u.user_id)
+    : [];
+  const boardMemberIds = Array.isArray(targetBoard?.member_ids) ? targetBoard.member_ids : [];
+  const invitedIds = Array.isArray(targetBoard?.invited_member_ids) ? targetBoard.invited_member_ids : [];
+  const mergedMembers = Array.from(new Set([...deptUserIds, ...invitedIds, ...boardMemberIds].filter(Boolean)));
+  const members = mergedMembers.length > 0 ? mergedMembers : humanUsers.map((u) => u.user_id);
   const set = (k) => (v) => setF((x) => ({ ...x, [k]: v?.target ? v.target.value : v }));
 
   const toggleRequestor = (uid) => {
@@ -310,41 +345,36 @@ export default function TaskCreate({ open, onOpenChange, preset, defaults, onCre
   };
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent className="w-full overflow-y-auto bg-surface p-0 sm:max-w-2xl" data-testid="task-create-panel">
+      <SheetContent className="w-full overflow-y-auto bg-surface p-0 sm:max-w-3xl" data-testid="task-create-panel">
         <form onSubmit={submit} className="flex min-h-full flex-col">
           <SheetHeader className="border-b p-5"><SheetTitle>Buat Tugas Baru</SheetTitle></SheetHeader>
           <div className="flex-1 space-y-4 p-5">
             <input autoFocus value={f.title} onChange={set("title")} placeholder="Judul tugas..." className="w-full bg-transparent text-2xl font-bold outline-none placeholder:text-sub" data-testid="task-title-input" />
             <RichEditor value={f.description} onChange={set("description")} testid="task-description-editor" />
             
-            {/* Multiple Requestors with Auto Reviewers */}
-            <Row label="Requestor" hint="Reviewer otomatis dari requestor">
-              <div className="space-y-2">
-                <div className="flex flex-wrap gap-1.5" data-testid="task-requestor-list">
-                  {humanUsers.map((u) => {
-                    const isSelected = (f.requestor_ids || []).includes(u.user_id);
-                    return (
-                      <button
-                        type="button"
-                        key={u.user_id}
-                        onClick={() => toggleRequestor(u.user_id)}
-                        className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-all cursor-pointer ${
-                          isSelected
-                            ? "border-[var(--c-accent)] bg-brand text-white shadow-sm"
-                            : "border-slate-200 bg-surface hover:bg-surface2 text-slate-700 dark:text-slate-200"
-                        }`}
-                        data-testid={`requestor-toggle-${u.user_id}`}
-                      >
-                        <span>{u.name.split(" ")[0]}</span>
-                        {u.user_id === me?.user_id && <span className="opacity-80 text-[10px]">(You)</span>}
-                        {isSelected && <span>✓</span>}
-                      </button>
-                    );
-                  })}
-                </div>
-                <p className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium">
-                  ✓ Reviewer otomatis diset ke requestor yang dipilih (approval 2 orang saat review)
-                </p>
+            {/* Multiple Requestors */}
+            <Row label="Requestor">
+              <div className="flex flex-wrap gap-1.5" data-testid="task-requestor-list">
+                {humanUsers.map((u) => {
+                  const isSelected = (f.requestor_ids || []).includes(u.user_id);
+                  return (
+                    <button
+                      type="button"
+                      key={u.user_id}
+                      onClick={() => toggleRequestor(u.user_id)}
+                      className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-all cursor-pointer ${
+                        isSelected
+                          ? "border-[var(--c-accent)] bg-brand text-white shadow-sm"
+                          : "border-slate-200 bg-surface hover:bg-surface2 text-slate-700 dark:text-slate-200"
+                      }`}
+                      data-testid={`requestor-toggle-${u.user_id}`}
+                    >
+                      <span>{u.name.split(" ")[0]}</span>
+                      {u.user_id === me?.user_id && <span className="opacity-80 text-[10px]">(You)</span>}
+                      {isSelected && <span>✓</span>}
+                    </button>
+                  );
+                })}
               </div>
             </Row>
 

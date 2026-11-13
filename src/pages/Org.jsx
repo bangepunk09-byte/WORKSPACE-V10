@@ -766,7 +766,7 @@ function Table({ units, humanUsers, divisions, reload, canMove }) {
 }
 
 export default function Org() {
-  const { users, ws, isAdmin, isManager, reloadUsers, reloadWs, subscribe } = useApp();
+  const { users, ws, isAdmin, isManager, reloadUsers, reloadWs, subscribe, t } = useApp();
   const [units, setUnits] = useState(ORG_UNITS_CACHE);
   const [view, setView] = useState("chart");
   const [q, setQ] = useState("");
@@ -926,8 +926,8 @@ export default function Org() {
     >
       <PageHeader
         icon={Network}
-        title="Organization Structure"
-        subtitle="Struktur organisasi yang selaras otomatis dengan seluruh divisi aktif di workspace. Tambah, edit, geser urutan, atau atur penempatan anggota."
+        title={t("org_title", "Organization Structure")}
+        subtitle={t("org_subtitle", "Struktur organisasi yang selaras otomatis dengan seluruh divisi aktif di workspace. Tambah, edit, geser urutan, atau atur penempatan anggota.")}
         actions={
           <div className="flex flex-wrap items-center gap-2">
             {isAdmin && (
@@ -937,7 +937,7 @@ export default function Org() {
                 data-testid="org-sync-divisions-btn"
               >
                 <RefreshCw size={15} className={syncing ? "animate-spin" : ""} />
-                Selaraskan Divisi
+                {t("org_sync_btn", "Selaraskan Divisi")}
               </GhostButton>
             )}
             {isManager && (
@@ -966,7 +966,7 @@ export default function Org() {
                   data-testid="org-add-unit-btn"
                 >
                   <Plus size={16} />
-                  Tambah Unit / Divisi
+                  {t("org_add_btn", "Tambah Unit / Divisi")}
                 </button>
               </>
             )}

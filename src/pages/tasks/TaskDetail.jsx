@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Archive, Share2, Paperclip, CheckCircle2, RotateCcw, Send, MessageSquare, History, Link2, Pencil, X } from "lucide-react";
+import { Archive, Share2, Paperclip, CheckCircle2, RotateCcw, Send, MessageSquare, History, Link2, Pencil, X, Printer } from "lucide-react";
 import { toast } from "sonner";
 import { api, errMsg } from "../../lib/api";
 import { useApp } from "../../context/AppContext";
@@ -13,6 +13,8 @@ import { toDeadline } from "./TaskCreate";
 import Checkpoints, { CommentItem } from "./Checkpoints";
 import { playSound } from "../../lib/sound";
 import { INITIAL_TASKS } from "../../data/initialTasks";
+import PrintPreviewDialog from "../../components/PrintPreviewDialog";
+import { tryNativePrint } from "../../lib/printReport";
 
 function Row({ label, children }) {
   return <div className="grid items-center gap-1 sm:grid-cols-[120px_1fr] sm:gap-3"><span className="text-xs font-semibold text-sub">{label}</span><div className="min-w-0">{children}</div></div>;
@@ -64,7 +66,7 @@ const getInitialTask = (id) => {
 };
 
 export default function TaskDetail({ id, onClose, onChanged }) {
-  const { me, statuses, userMap, isManager } = useApp();
+  const { me, statuses, userMap, labelMap, isManager } = useApp();
   const [t, setT] = useState(() => getInitialTask(id));
   const [projects, setProjects] = useState(() => {
     try {
@@ -84,6 +86,7 @@ export default function TaskDetail({ id, onClose, onChanged }) {
   const [desc, setDesc] = useState("");
   const [tab, setTab] = useState("comments");
   const [groups, setGroups] = useState(null);
+  const [printPreviewOpen, setPrintPreviewOpen] = useState(false);
   const navigate = useNavigate();
 
   const load = () => {
@@ -139,28 +142,92 @@ export default function TaskDetail({ id, onClose, onChanged }) {
   const done = statuses.find((s) => s.key === t?.status)?.is_done;
   const ro = t ? t.can_edit === false : false;
   const d = t && dueInfo(t.deadline, done);
-  const reqIds = t?.requestor_ids && t.requestor_ids.length ? t.requestor_ids : (t?.requestor_id ? [t.requestor_id] : []);
+  const reqIds = t?.requestor_ids && t.requestor_ids.length ? t.requestor_ids : (t?.requestor_id ? [t.requestor_id] : (t?.created_by ? [t.created_by] : []));
   const revIds = t?.reviewer_ids && t.reviewer_ids.length ? t.reviewer_ids : reqIds;
   const reviewer = t && me?.user_id && (revIds.includes(me.user_id) || reqIds.includes(me.user_id));
-  const boardMembers = boards.find((b) => b.id === t?.board_id)?.member_ids || t?.board?.member_ids || [];
-  const humanUserIds = Object.values(userMap || {})
-    .filter((u) => u && !u.is_bot && u.role !== "assistant" && u.user_id !== "user_circle_assistant")
-    .map((u) => u.user_id);
-  const members = boardMembers.length > 0 ? boardMembers : humanUserIds;
+
+  const humanUsersList = Object.values(userMap || {})
+    .filter((u) => u && !u.is_bot && u.role !== "assistant" && u.user_id !== "user_circle_assistant");
+  const humanUserIds = humanUsersList.map((u) => u.user_id);
+  const activeBoardObj = boards.find((b) => b.id === t?.board_id) || t?.board || null;
+  const targetDept = String(activeBoardObj?.department || t?.department || "").trim().toLowerCase();
+  const divisionUserIds = targetDept
+    ? humanUsersList.filter((u) => String(u.department || "").trim().toLowerCase() === targetDept).map((u) => u.user_id)
+    : [];
+  const boardMemberIds = activeBoardObj?.member_ids || [];
+  const invitedBoardIds = activeBoardObj?.invited_member_ids || [];
+  const taskParticipantIds = [
+    ...(Array.isArray(t?.assignee_ids) ? t.assignee_ids : (t?.assignee_id ? [t.assignee_id] : [])),
+    ...(Array.isArray(t?.checkpoints) ? t.checkpoints.map((c) => c?.assignee_id) : [])
+  ].filter(Boolean);
+  const combinedMemberIds = Array.from(new Set([...divisionUserIds, ...invitedBoardIds, ...boardMemberIds, ...taskParticipantIds].filter(Boolean)));
+  const members = combinedMemberIds.length > 0 ? combinedMemberIds : humanUserIds;
+
+  const handleReviseRedirectToChat = async () => {
+    try {
+      await api.post(`/tasks/${id}/approval`, { decision: "revise", note: "" });
+    } catch (err) {
+      toast.error(errMsg(err));
+    }
+    let targetCid = t?.conversation_id || "";
+    if (!targetCid) {
+      try {
+        const { data: convs } = await api.get("/conversations");
+        const list = Array.isArray(convs) ? convs : [];
+        const deptName = String(activeBoardObj?.department || t?.department || "").trim().toLowerCase();
+        const deptGroup = deptName && list.find((c) => c.type === "group" && String(c.name || "").trim().toLowerCase() === deptName);
+        const anyGroup = list.find((c) => c.type === "group");
+        const primaryAssignee = t?.assignee_id || t?.assignee_ids?.[0];
+        const dmWithAssignee = primaryAssignee && list.find((c) => c.type === "dm" && Array.isArray(c.member_ids) && c.member_ids.includes(primaryAssignee));
+        targetCid = deptGroup?.id || dmWithAssignee?.id || anyGroup?.id || "";
+      } catch {}
+    }
+    toast.info("Mengarahkan ke chat untuk mengirim catatan revisi");
+    onChanged?.();
+    onClose?.();
+    const qs = new URLSearchParams({
+      reviseTask: id || "",
+      taskNum: t?.number_str || "",
+      taskTitle: t?.title || ""
+    }).toString();
+    if (targetCid) {
+      navigate(`/messages/${targetCid}?${qs}`);
+    } else {
+      navigate(`/messages?${qs}`);
+    }
+  };
+
   return (
+    <>
     <Sheet open={!!id} onOpenChange={(v) => !v && onClose()}>
-      <SheetContent className="w-full overflow-y-auto bg-surface p-0 sm:max-w-2xl" data-testid="task-detail-panel">
+      <SheetContent className="w-full overflow-y-auto bg-surface p-0 sm:max-w-3xl print:max-w-none print:static print:shadow-none print:border-0" data-testid="task-detail-panel">
         <SheetHeader className="flex flex-row items-center justify-between border-b px-6 py-4">
           <SheetTitle className="text-base font-bold">Detail Tugas</SheetTitle>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-full p-2 text-sub hover:bg-surface2 hover:text-ink transition-colors cursor-pointer"
-            aria-label="Tutup detail"
-            data-testid="task-detail-close-btn"
-          >
-            <X size={18} />
-          </button>
+          <div className="flex items-center gap-1 print:hidden">
+            <button
+              type="button"
+              onClick={() => {
+                if (!tryNativePrint()) {
+                  setPrintPreviewOpen(true);
+                }
+              }}
+              className="flex h-10 items-center gap-2 rounded-full border px-4 text-sm font-semibold text-sub hover:bg-surface2 hover:text-ink transition-colors cursor-pointer"
+              title="Print Detail Tugas"
+              data-testid="task-detail-print-btn"
+            >
+              <Printer size={16} />
+              <span className="hidden sm:inline">Print</span>
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-full p-2 text-sub hover:bg-surface2 hover:text-ink transition-colors cursor-pointer"
+              aria-label="Tutup detail"
+              data-testid="task-detail-close-btn"
+            >
+              <X size={18} />
+            </button>
+          </div>
         </SheetHeader>
         {!t ? <Spinner /> : (
           <div className="animate-task-reveal pb-10">
@@ -197,16 +264,8 @@ export default function TaskDetail({ id, onClose, onChanged }) {
                   {(reviewer || isManager) && (
                     <div className="flex items-center gap-2 pt-1">
                       <button
-                        onClick={async () => {
-                          const note = window.prompt("Catatan revisi (opsional):", "");
-                          if (note === null) return;
-                          try {
-                            await api.post(`/tasks/${id}/approval`, { decision: "revise", note });
-                            toast.success("Catatan revisi dikirim, status kembali ke In Progress");
-                            load();
-                            onChanged?.();
-                          } catch (err) { toast.error(errMsg(err)); }
-                        }}
+                        type="button"
+                        onClick={handleReviseRedirectToChat}
                         className="flex h-10 flex-1 items-center justify-center gap-1.5 rounded-xl border border-amber-300 bg-surface px-4 text-xs font-bold text-amber-800 hover:bg-amber-100 dark:bg-surface2"
                         data-testid="request-revision-btn"
                       >
@@ -276,7 +335,7 @@ export default function TaskDetail({ id, onClose, onChanged }) {
                   </div>
                 </Row>
 
-                {/* Multi Requestor with Auto Reviewer */}
+                {/* Multi Requestor */}
                 <Row label="Requestor">
                   <div className="space-y-1.5">
                     <div className="flex flex-wrap items-center gap-1.5">
@@ -319,21 +378,6 @@ export default function TaskDetail({ id, onClose, onChanged }) {
                         </select>
                       )}
                     </div>
-                  </div>
-                </Row>
-
-                {/* Auto Reviewers */}
-                <Row label="Reviewer">
-                  <div className="space-y-1">
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      {revIds.map((uid) => (
-                        <span key={uid} className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/40 px-2.5 py-1 text-xs font-semibold text-emerald-800 dark:text-emerald-300">
-                          <Avatar user={userMap[uid]} size={18} showStatus={false} />
-                          {userMap[uid]?.name || "Reviewer"}
-                        </span>
-                      ))}
-                    </div>
-                    <p className="text-[11px] text-slate-400">Reviewer otomatis tersinkronisasi dari daftar requestor.</p>
                   </div>
                 </Row>
 
@@ -446,5 +490,16 @@ export default function TaskDetail({ id, onClose, onChanged }) {
         )}
       </SheetContent>
     </Sheet>
+    <PrintPreviewDialog
+      open={printPreviewOpen}
+      onOpenChange={setPrintPreviewOpen}
+      mode="detail"
+      task={t}
+      boardName={activeBoardObj?.name || t?.department || "Task Detail"}
+      userMap={userMap}
+      labelMap={labelMap}
+      statuses={statuses}
+    />
+    </>
   );
 }

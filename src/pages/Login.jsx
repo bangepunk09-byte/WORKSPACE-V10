@@ -5,7 +5,8 @@ import { toast } from "sonner";
 import { useApp } from "../context/AppContext";
 import { api, errMsg, uploadFile, fileUrl } from "../lib/api";
 import { Avatar } from "../components/common";
-import { googleSignIn, setManualGoogleAuth } from "../lib/auth";
+import { googleBasicSignIn, setManualGoogleAuth } from "../lib/auth";
+import { getTranslation } from "../lib/i18n";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
 
 const STATUS_MSG = {
@@ -51,6 +52,7 @@ export default function Login() {
   const [brand, setBrand] = useState({});
   const navigate = useNavigate();
   const status = params.get("status");
+  const t = (key, fallback) => getTranslation(key, brand?.custom_copywriting || {}, fallback);
 
   // Mode: 'login' | 'signup'
   const [mode, setMode] = useState("login");
@@ -199,8 +201,9 @@ export default function Login() {
     }
   };
 
-  // Google fallback modal state (used if popup is blocked or domain not in Firebase whitelist)
+  // Google fallback modal state (used if popup is blocked or Google OAuth is in Testing mode / Error 403)
   const [googleModalOpen, setGoogleModalOpen] = useState(false);
+  const [googleFallbackReason, setGoogleFallbackReason] = useState(false);
   const [googleForm, setGoogleForm] = useState({
     name: "",
     email: "",
@@ -252,11 +255,23 @@ export default function Login() {
     }
   };
 
+  const openGoogleEmailModal = (fromBlockedPopup = false) => {
+    const fallbackDept = availableDivisions.find((d) => d.toLowerCase() !== "management") || availableDivisions[0] || "Marketing";
+    setGoogleFallbackReason(fromBlockedPopup);
+    setGoogleForm({
+      name: signupForm.name || "",
+      email: (mode === "login" ? loginEmail : signupForm.email) || loginEmail || "",
+      department: signupForm.department || fallbackDept,
+      job_title: signupForm.job_title || ""
+    });
+    setGoogleModalOpen(true);
+  };
+
   // Google Sign-In / Sign-Up
   const google = async () => {
     const fallbackDept = availableDivisions.find((d) => d.toLowerCase() !== "management") || availableDivisions[0] || "Marketing";
     try {
-      const res = await googleSignIn();
+      const res = await googleBasicSignIn();
       if (res?.user?.email) {
         await submitGoogleAccount({
           email: res.user.email,
@@ -269,16 +284,10 @@ export default function Login() {
         return;
       }
     } catch {
-      // Fallback below when popup is blocked or domain is restricted in preview iframe
+      // Fallback below when popup is blocked or Google OAuth Testing Mode blocks non-tester email (Error 403)
     }
 
-    setGoogleForm({
-      name: signupForm.name || "",
-      email: (mode === "login" ? loginEmail : signupForm.email) || loginEmail || "",
-      department: signupForm.department || fallbackDept,
-      job_title: signupForm.job_title || ""
-    });
-    setGoogleModalOpen(true);
+    openGoogleEmailModal(true);
   };
 
   return (
@@ -287,7 +296,7 @@ export default function Login() {
       <div className="flex flex-1 flex-col items-center justify-start lg:h-full lg:overflow-y-auto scroll-thin px-4 py-6 lg:max-w-[620px]">
         <div className="my-auto w-full max-w-md py-4 animate-rise">
           <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-ink mb-6">
-            {mode === "login" ? "Selamat Datang Kembali" : "Daftar Akun Baru"}
+            {mode === "login" ? t("auth_welcome_login", "Selamat Datang Kembali") : t("auth_welcome_signup", "Daftar Akun Baru")}
           </h1>
 
           {/* Tab Switcher: Masuk vs Daftar Akun */}
@@ -302,7 +311,7 @@ export default function Login() {
               }`}
               data-testid="tab-login"
             >
-              Masuk
+              {t("auth_login_tab", "Masuk")}
             </button>
             <button
               type="button"
@@ -314,7 +323,7 @@ export default function Login() {
               }`}
               data-testid="tab-signup"
             >
-              Daftar Akun
+              {t("auth_signup_tab", "Daftar Akun")}
             </button>
           </div>
 
@@ -338,7 +347,7 @@ export default function Login() {
           {mode === "login" && (
             <form onSubmit={handleLoginSubmit} className="space-y-4 animate-fadeIn" data-testid="login-form">
               <div>
-                <label className="mb-1.5 block text-xs font-semibold text-sub">Alamat Email *</label>
+                <label className="mb-1.5 block text-xs font-semibold text-sub">{t("auth_email_label", "Alamat Email *")}</label>
                 <div className="relative flex items-center">
                   <Mail size={16} className="absolute left-3.5 text-sub" />
                   <input
@@ -355,7 +364,7 @@ export default function Login() {
 
               <div>
                 <div className="flex items-center justify-between mb-1.5">
-                  <label className="text-xs font-semibold text-sub">Password *</label>
+                  <label className="text-xs font-semibold text-sub">{t("auth_password_label", "Password *")}</label>
                   <span className="text-[11px] text-sub">Minimal 4 karakter</span>
                 </div>
                 <div className="relative flex items-center">
@@ -385,7 +394,7 @@ export default function Login() {
                 className="btn-accent h-11 w-full rounded-2xl text-xs font-bold shadow-md transition-all hover:shadow-lg disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer mt-2"
                 data-testid="login-submit-btn"
               >
-                {busyLogin ? "Memproses..." : "Masuk ke Workspace"}
+                {busyLogin ? "Memproses..." : t("auth_submit_login", "Masuk ke Workspace")}
                 <ArrowRight size={15} />
               </button>
             </form>
@@ -440,7 +449,7 @@ export default function Login() {
               </div>
 
               <div>
-                <label className="mb-1.5 block text-xs font-semibold text-sub">Nama Lengkap *</label>
+                <label className="mb-1.5 block text-xs font-semibold text-sub">{t("auth_name_label", "Nama Lengkap *")}</label>
                 <div className="relative flex items-center">
                   <User size={16} className="absolute left-3.5 text-sub" />
                   <input
@@ -456,7 +465,7 @@ export default function Login() {
               </div>
 
               <div>
-                <label className="mb-1.5 block text-xs font-semibold text-sub">Alamat Email *</label>
+                <label className="mb-1.5 block text-xs font-semibold text-sub">{t("auth_email_label", "Alamat Email *")}</label>
                 <div className="relative flex items-center">
                   <Mail size={16} className="absolute left-3.5 text-sub" />
                   <input
@@ -473,7 +482,7 @@ export default function Login() {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="mb-1.5 block text-xs font-semibold text-sub">Password *</label>
+                  <label className="mb-1.5 block text-xs font-semibold text-sub">{t("auth_password_label", "Password *")}</label>
                   <div className="relative flex items-center">
                     <Lock size={15} className="absolute left-3 text-sub" />
                     <input
@@ -514,7 +523,7 @@ export default function Login() {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="mb-1.5 block text-xs font-semibold text-sub">Divisi</label>
+                  <label className="mb-1.5 block text-xs font-semibold text-sub">{t("auth_division_label", "Divisi")}</label>
                   <div className="relative flex items-center">
                     <Building2 size={15} className="absolute left-3.5 text-sub pointer-events-none z-10" />
                     <select
@@ -532,7 +541,7 @@ export default function Login() {
                 </div>
 
                 <div>
-                  <label className="mb-1.5 block text-xs font-semibold text-sub">Jabatan / Posisi</label>
+                  <label className="mb-1.5 block text-xs font-semibold text-sub">{t("auth_job_label", "Jabatan / Posisi")}</label>
                   <div className="relative flex items-center">
                     <Briefcase size={15} className="absolute left-3 text-sub pointer-events-none" />
                     <input
@@ -569,7 +578,7 @@ export default function Login() {
                 className="btn-accent h-11 w-full rounded-2xl text-xs font-bold shadow-md transition-all hover:shadow-lg disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer mt-2"
                 data-testid="signup-submit-btn"
               >
-                {busySignup ? "Mengirim Pendaftaran..." : "Daftar & Minta Approval Super Admin"}
+                {busySignup ? "Mengirim Pendaftaran..." : t("auth_submit_signup", "Daftar & Minta Approval Super Admin")}
               </button>
             </form>
           )}
@@ -589,7 +598,16 @@ export default function Login() {
             data-testid="login-google-button"
           >
             <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.4-.4-3.5z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-7.9l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.4-.4-3.5z"/></svg>
-            {mode === "signup" ? "Daftar dengan Akun Google" : "Masuk dengan Akun Google"}
+            {mode === "signup" ? t("auth_google_signup", "Daftar dengan Akun Google") : t("auth_google_login", "Masuk dengan Akun Google")}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => openGoogleEmailModal(false)}
+            className="mt-2 w-full text-center text-[11px] font-semibold text-brand hover:underline cursor-pointer"
+            data-testid="login-google-direct-btn"
+          >
+            Muncul Error 403 / akses diblokir? Masuk langsung dengan Email Kantor / Google
           </button>
 
           <p className="mt-3.5 flex items-center justify-center gap-1.5 text-[11px] text-sub text-center">
@@ -625,6 +643,11 @@ export default function Login() {
             }}
             className="space-y-3.5 pt-2"
           >
+            {googleFallbackReason && (
+              <div className="rounded-xl border border-amber-200 dark:border-amber-800/50 bg-amber-50/80 dark:bg-amber-950/30 p-2.5 text-[11px] text-amber-900 dark:text-amber-200 leading-relaxed">
+                Popup Google OAuth sedang dibatasi untuk email non-tester (<b>Error 403 / Testing Mode</b>). Masukkan email Anda di bawah agar tetap bisa {mode === "login" ? "masuk" : "mendaftar"} ke workspace.
+              </div>
+            )}
             <p className="text-center text-xs text-sub leading-relaxed">
               {mode === "login"
                 ? "Masukkan email Google Anda untuk langsung masuk ke workspace CIRCLE."

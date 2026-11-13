@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { toast } from "sonner";
 import { api, wsUrl, fileUrl, setAuthUserId } from "../lib/api";
 import { applyTheme, buildTheme } from "../lib/theme";
-import { getTranslation } from "../lib/i18n";
+import { getTranslation, getEffectiveCopywriting } from "../lib/i18n";
 import { playSound } from "../lib/sound";
 import { hydrateConversationsCache, upsertConversationInCache, appendMessageToCache, updateMessageInCache, clearChatCache } from "../pages/chat/ChatView";
 import { hydratePostsCache } from "../pages/Beranda";
@@ -404,7 +404,9 @@ export function AppProvider({ children }) {
           api.get("/workspace").then((r) => {
             setSession((s) => {
               if (!s) return s;
-              return { ...s, workspace: r.data };
+              const next = { ...s, workspace: r.data };
+              try { localStorage.setItem("circle_session_cache", JSON.stringify(next)); } catch {}
+              return next;
             });
           }).catch(() => {});
         }
@@ -563,7 +565,8 @@ export function AppProvider({ children }) {
       isManager: ["super_admin", "workspace_admin", "department_manager", "project_manager"].includes(me?.role),
       isDemo: !!me?.is_demo,
       lang: "en",
-      t: (key, fallback) => getTranslation(key, ws?.custom_copywriting || prefs?.custom_copywriting, fallback),
+      effectiveCopywriting: getEffectiveCopywriting(ws?.custom_copywriting, prefs?.custom_copywriting),
+      t: (key, fallback) => getTranslation(key, getEffectiveCopywriting(ws?.custom_copywriting, prefs?.custom_copywriting), fallback),
       themeDraft, setThemeDraft,
       reloadUsers: () => api.get("/users").then((r) => {
         if (Array.isArray(r.data)) {

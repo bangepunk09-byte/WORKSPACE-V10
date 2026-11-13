@@ -6,7 +6,7 @@ import { api } from "../lib/api";
 import { Avatar, PageHeader, Empty } from "../components/common";
 
 export default function Employees() {
-  const { users, online } = useApp();
+  const { users, online, t } = useApp();
   const [q, setQ] = useState("");
   const [sel, setSel] = useState([]);
   const navigate = useNavigate();
@@ -48,14 +48,14 @@ export default function Employees() {
     >
       <PageHeader
         icon={Users}
-        title="Employee"
+        title={t("employee_title", "Employee")}
         subtitle={`${list.length} dari ${humanUsers.length} karyawan aktif di workspace`}
       />
 
       <div className="mb-6 flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between" data-testid="division-tabs">
         <div className="flex items-center gap-2 overflow-x-auto pb-1 sm:pb-0 scroll-thin">
           <button onClick={() => setSel([])} className={chip(!sel.length)} data-testid="division-tab-all">
-            Semua
+            {t("employee_all_btn", "Semua")}
           </button>
           {divisions.map((d) => (
             <button
@@ -76,7 +76,7 @@ export default function Employees() {
           <input
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="Cari nama atau jabatan…"
+            placeholder={t("employee_search_placeholder", "Cari nama atau jabatan…")}
             className="flex-1 bg-transparent text-sm outline-none"
             data-testid="employee-search-input"
           />

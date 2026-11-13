@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { Plus, Search, MessageCircle, ShieldCheck } from "lucide-react";
 import { useApp } from "../context/AppContext";
 import { api } from "../lib/api";
@@ -79,7 +79,7 @@ function getDefaultConvsForUser(user) {
 
 export default function Messages() {
   const { cid } = useParams();
-  const { me, userMap, subscribe, ws } = useApp();
+  const { me, userMap, subscribe, ws, t } = useApp();
   const [convs, setConvs] = useState(() => {
     try {
       const uid = me?.user_id;
@@ -97,6 +97,7 @@ export default function Messages() {
   const [tab, setTab] = useState("all");
   const [dm, setDm] = useState(false);
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
   const load = useCallback(() => {
     if (!me?.user_id) return Promise.resolve();
@@ -277,15 +278,25 @@ export default function Messages() {
     }), [safeConvs, userMap, me, ws?.assistant_name, ws?.assistant_avatar]);
 
   const list = named.filter((c) => (tab === "all" || (tab === "dm" ? c.type === "dm" : c.type === "group")) && (c.title || "").toLowerCase().includes(q.toLowerCase()));
+
+  useEffect(() => {
+    if (!cid && searchParams.get("reviseTask") && named.length > 0) {
+      const target = named.find((c) => c.type === "group") || named[0];
+      if (target?.id) {
+        navigate(`/messages/${target.id}?${searchParams.toString()}`, { replace: true });
+      }
+    }
+  }, [cid, searchParams, named, navigate]);
+
   return (
     <div className={`flex ${cid ? "h-[100dvh]" : "h-[calc(100dvh-7.5rem)]"} md:h-screen animate-crossfade`} data-testid="messages-page">
       <aside className={`${cid ? "hidden lg:flex" : "flex"} w-full lg:w-[320px] shrink-0 flex-col border-r bg-surface`}>
         <div className="p-4 pb-2">
-          <div className="flex items-center justify-between"><h1 className="text-2xl font-bold tracking-tight">Messages</h1>
+          <div className="flex items-center justify-between"><h1 className="text-2xl font-bold tracking-tight">{t("messages_title", "Messages")}</h1>
             <button onClick={() => setDm(true)} className="btn-accent flex h-10 w-10 items-center justify-center" aria-label="New message" data-testid="new-message-btn"><Plus size={18} /></button></div>
-          <div className="mt-3 flex items-center gap-2 rounded-xl border bg-surface2 px-3"><Search size={15} className="text-sub" /><input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filter conversations" className="h-10 flex-1 bg-transparent text-sm outline-none" data-testid="conversation-filter-input" /></div>
+          <div className="mt-3 flex items-center gap-2 rounded-xl border bg-surface2 px-3"><Search size={15} className="text-sub" /><input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("messages_search_placeholder", "Filter conversations")} className="h-10 flex-1 bg-transparent text-sm outline-none" data-testid="conversation-filter-input" /></div>
           <div className="mt-3 flex gap-1 rounded-xl bg-surface2 p-1 text-xs font-semibold">
-            {[["all", "All"], ["dm", "Direct"], ["group", "Groups"]].map(([k, l]) => <button key={k} onClick={() => setTab(k)} className={`flex-1 rounded-lg py-1.5 transition-colors cursor-pointer ${tab === k ? "bg-surface text-ink shadow-sm font-bold" : "text-sub hover:text-ink"}`} data-testid={`conv-tab-${k}`}>{l}</button>)}
+            {[["all", t("messages_tab_all", "All")], ["dm", t("messages_tab_dm", "Direct")], ["group", t("messages_tab_groups", "Groups")]].map(([k, l]) => <button key={k} onClick={() => setTab(k)} className={`flex-1 rounded-lg py-1.5 transition-colors cursor-pointer ${tab === k ? "bg-surface text-ink shadow-sm font-bold" : "text-sub hover:text-ink"}`} data-testid={`conv-tab-${k}`}>{l}</button>)}
           </div>
         </div>
         <div className="flex-1 overflow-y-auto px-2 pb-2 scroll-thin">
@@ -309,7 +320,7 @@ export default function Messages() {
         </div>
       </aside>
       <section className={`${cid ? "flex" : "hidden lg:flex"} min-w-0 flex-1`}>
-        {cid ? <ChatView cid={cid} onChange={load} onRead={handleRead} /> : <div className="flex flex-1 items-center justify-center"><Empty icon={MessageCircle} title="Pick a conversation" text="Your messages stay private to the people in each conversation." /></div>}
+        {cid ? <ChatView cid={cid} onChange={load} onRead={handleRead} /> : <div className="flex flex-1 items-center justify-center"><Empty icon={MessageCircle} title={t("messages_empty_title", "Pick a conversation")} text={t("messages_empty_desc", "Your messages stay private to the people in each conversation.")} /></div>}
       </section>
       <NewDM open={dm} onOpenChange={setDm} convs={convs} onCreated={(newConv) => setConvs((prev) => [newConv, ...(prev || []).filter((c) => c.id !== newConv.id)])} />
     </div>

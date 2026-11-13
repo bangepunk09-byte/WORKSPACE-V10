@@ -16,7 +16,7 @@ const DAYS = [
 ];
 
 export default function AutomationDialog({ open, onClose, onGenerated }) {
-  const { labels } = useApp();
+  const { labels, t } = useApp();
   const [automations, setAutomations] = useState([]);
   const [boards, setBoards] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -117,7 +117,7 @@ export default function AutomationDialog({ open, onClose, onGenerated }) {
               <Sparkles size={20} />
             </span>
             <div>
-              <h3 className="text-lg font-bold text-ink">Card Creation Automation</h3>
+              <h3 className="text-lg font-bold text-ink">{t("tasks_automation", "Card Creation Automation")}</h3>
               <p className="text-xs text-sub">Buat kartu template otomatis terjadwal (mis. tiap Senin 09:00 WIB untuk ASLI RI Regular 1, 2, 3).</p>
             </div>
           </div>

@@ -124,12 +124,13 @@ function TeamChart({ data, type }) {
 const Dot = ({ c, label }) => <span className="flex items-center gap-2 text-sm text-sub"><i className="h-3 w-3 rounded-full" style={{ background: c }} />{label}</span>;
 
 function TeamPerformance({ data, anchor, setAnchor, range, setRange }) {
+  const { t } = useApp();
   const [type, setType] = useState("line");
   const s = data?.summary || INITIAL_DATA.summary;
   return (
     <section className="card min-w-0 p-5 sm:p-6 md:col-span-2 xl:col-span-3" data-testid="widget-stats">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-        <div><h3 className="flex items-center gap-2.5 text-xl font-bold"><TrendingUp size={20} className="text-emerald-500" />Performa & Beban Kerja Tim</h3><p className="mt-1 text-sm text-sub">Monitoring penyelesaian tugas dan ketepatan waktu operasional.</p></div>
+        <div><h3 className="flex items-center gap-2.5 text-xl font-bold"><TrendingUp size={20} className="text-emerald-500" />{t("dash_perf_title", "Performa & Beban Kerja Tim")}</h3><p className="mt-1 text-sm text-sub">{t("dash_perf_subtitle", "Monitoring penyelesaian tugas dan ketepatan waktu operasional.")}</p></div>
         <div className="flex flex-col items-start gap-3 lg:items-end">
           <div className="flex flex-wrap gap-2">
             <div className="flex rounded-2xl bg-surface2 p-1"><button onClick={() => setRange("7d")} className={seg(range === "7d")} data-testid="team-range-7d">7 Hari</button><button onClick={() => setRange("4w")} className={seg(range === "4w")} data-testid="team-range-4w">1 Bulan terakhir</button></div>
@@ -138,9 +139,9 @@ function TeamPerformance({ data, anchor, setAnchor, range, setRange }) {
         </div>
       </div>
       <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <StatCard tone="green" label="Tugas Selesai" value={s.done ?? 0} note={s.done ? `${s.done} tugas diselesaikan` : "Belum ada tugas selesai"} icon={CheckCircle2} testid="team-stat-done" />
-        <StatCard tone="red" label="Lewat Tenggat" value={s.overdue ?? 0} note={s.overdue ? `${s.overdue} tugas melewati deadline` : "Tidak ada keterlambatan"} icon={AlertTriangle} testid="team-stat-overdue" />
-        <StatCard tone="gray" label="Ketepatan Waktu" value={`${s.on_time_rate ?? 0}%`} note={s.due ? `${s.on_time} dari ${s.due} tugas tepat waktu` : "Belum ada data tugas"} icon={Target} testid="team-stat-ontime" />
+        <StatCard tone="green" label={t("dash_perf_done", "Tugas Selesai")} value={s.done ?? 0} note={s.done ? `${s.done} tugas diselesaikan` : "Belum ada tugas selesai"} icon={CheckCircle2} testid="team-stat-done" />
+        <StatCard tone="red" label={t("dash_perf_overdue", "Lewat Tenggat")} value={s.overdue ?? 0} note={s.overdue ? `${s.overdue} tugas melewati deadline` : "Tidak ada keterlambatan"} icon={AlertTriangle} testid="team-stat-overdue" />
+        <StatCard tone="gray" label={t("dash_perf_ontime", "Ketepatan Waktu")} value={`${s.on_time_rate ?? 0}%`} note={s.due ? `${s.on_time} dari ${s.due} tugas tepat waktu` : "Belum ada data tugas"} icon={Target} testid="team-stat-ontime" />
       </div>
       <div className="mt-6 flex justify-end gap-5"><Dot c={GREEN} label="Tasks Selesai" /><Dot c={RED} label="Tasks Overdue" /></div>
       <TeamChart data={data} type={type} />
@@ -183,7 +184,7 @@ function PersonCard({ p }) {
 }
 
 function Personnel({ data }) {
-  const { userMap } = useApp();
+  const { userMap, t } = useApp();
   const [div, setDiv] = useState("");
   const [all, setAll] = useState(false);
   const rawPeople = Array.isArray(data?.people) ? data.people : INITIAL_DATA.people;
@@ -197,22 +198,8 @@ function Personnel({ data }) {
   return (
     <section className="card min-w-0 p-5 sm:p-6 md:col-span-2 xl:col-span-3" data-testid="widget-personnel">
       <div className="flex flex-col gap-4 border-b pb-5 lg:flex-row lg:items-start lg:justify-between">
-        <div><h3 className="flex items-center gap-2.5 text-xl font-bold"><Users size={20} className="text-[#2563EB]" />Kapasitas & Beban Kerja Personel</h3><p className="mt-1 text-sm text-sub">Indikator tekanan kerja berdasarkan urgensi deadline & jumlah task yang harus disubmit.</p></div>
+        <div><h3 className="flex items-center gap-2.5 text-xl font-bold"><Users size={20} className="text-[#2563EB]" />{t("dash_personnel_title", "Kapasitas & Beban Kerja Personel")}</h3><p className="mt-1 text-sm text-sub">{t("dash_personnel_subtitle", "Indikator tekanan kerja berdasarkan urgensi deadline & jumlah task yang harus disubmit.")}</p></div>
         <div className="flex flex-wrap gap-2">{Object.entries(STATUS).map(([k, [e, l, c]]) => <span key={k} className={`flex items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-sm font-bold ${c}`} data-testid={`personnel-count-${k}`}>{e} {count(k)} {l}</span>)}</div>
-      </div>
-      <div className="mt-4 grid grid-cols-1 gap-2 rounded-2xl border bg-surface2/50 p-3 text-xs md:grid-cols-3">
-        <div className="flex items-start gap-2 rounded-xl bg-surface/80 p-2.5 border border-emerald-200/70 dark:border-emerald-900/40">
-          <span className="shrink-0">😄</span>
-          <div><p className="font-bold text-emerald-700 dark:text-emerald-400">Optimal</p><p className="text-[11px] text-sub leading-relaxed">0 tugas aktif, deadline ≥ 2 hari ke depan (1–4 tugas), atau 1–2 tugas dengan deadline 1 hari lagi.</p></div>
-        </div>
-        <div className="flex items-start gap-2 rounded-xl bg-surface/80 p-2.5 border border-sky-200/70 dark:border-sky-900/40">
-          <span className="shrink-0">😐</span>
-          <div><p className="font-bold text-sky-700 dark:text-sky-400">Stabil</p><p className="text-[11px] text-sub leading-relaxed">3–4 tugas deadline ≤ besok, deadline hari ini (≥ 6 jam), atau ≥ 5 tugas dengan deadline ≥ 2 hari.</p></div>
-        </div>
-        <div className="flex items-start gap-2 rounded-xl bg-surface/80 p-2.5 border border-rose-200/70 dark:border-rose-900/40">
-          <span className="shrink-0">😰</span>
-          <div><p className="font-bold text-rose-700 dark:text-rose-400">Under Pressure</p><p className="text-[11px] text-sub leading-relaxed">Ada deadline &lt; 6 jam / overdue, ≥ 5 tugas harus submit ≤ besok, atau ≥ 8 tugas aktif sekaligus.</p></div>
-        </div>
       </div>
       {depts.length > 0 && <div className="mt-4 flex flex-wrap items-center gap-2" data-testid="personnel-division-filter">
         <span className="flex items-center gap-1.5 text-sm text-sub"><Filter size={14} />Divisi:</span>

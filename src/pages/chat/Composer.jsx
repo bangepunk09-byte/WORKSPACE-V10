@@ -345,6 +345,26 @@ export default function Composer({ conv, reply, onCancelReply, onSent, onPoll })
     if (ta.current) { ta.current.style.height = "auto"; ta.current.style.height = `${Math.min(ta.current.scrollHeight, 160)}px`; }
   }, [text]);
 
+  useEffect(() => {
+    const onPrefill = (ev) => {
+      const detail = ev?.detail || {};
+      if (detail.conversationId && detail.conversationId !== conv?.id) return;
+      if (typeof detail.text === "string") {
+        setText(detail.text);
+      }
+      requestAnimationFrame(() => {
+        if (ta.current) {
+          ta.current.focus();
+          const len = ta.current.value.length;
+          try { ta.current.setSelectionRange(len, len); } catch {}
+          ta.current.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        }
+      });
+    };
+    window.addEventListener("circle:composer-prefill", onPrefill);
+    return () => window.removeEventListener("circle:composer-prefill", onPrefill);
+  }, [conv?.id]);
+
   const post = async (body) => {
     const tempId = `msg_opt_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
     const optimisticMsg = {

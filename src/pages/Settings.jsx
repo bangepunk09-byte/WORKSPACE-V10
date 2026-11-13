@@ -9,7 +9,7 @@ import ThemeEditor from "./settings/ThemeEditor";
 import BackgroundEditor from "./settings/BackgroundEditor";
 import { UserProfileSettings } from "./settings/UserProfileSettings";
 import { Card, AdminOverview, PeopleAccess, WorkspaceBranding, DivisionsAdmin, ItemTypesAdmin, WeeklyReportCard, LabelsAdmin, StatusesAdmin, ProfileFieldsAdmin, StickersAdmin, AssistantBranding } from "./settings/AdminPanels";
-import { DEFAULT_COPYWRITING, generateCopywritingCsv, parseCopywritingCsv } from "../lib/i18n";
+import { DEFAULT_COPYWRITING, COPYWRITING_GROUPS, getEffectiveCopywriting, cleanCopywritingMap, generateCopywritingCsv, parseCopywritingCsv } from "../lib/i18n";
 import { playSound } from "../lib/sound";
 import { PWAInstallButton } from "../components/PWAInstallButton";
 import BackupRestorePanel from "./settings/BackupRestorePanel";
@@ -148,19 +148,21 @@ function NotificationPrefs() {
 }
 
 function CopywritingSettings() {
-  const { prefs, savePrefs, ws, reloadWs, isAdmin } = useApp();
-  const custom = ws?.custom_copywriting || prefs.custom_copywriting || {};
+  const { prefs, savePrefs, ws, reloadWs, isAdmin, t } = useApp();
+  const custom = getEffectiveCopywriting(ws?.custom_copywriting, prefs?.custom_copywriting);
   const [searchTerm, setSearchTerm] = useState("");
+  const [category, setCategory] = useState("all");
   const [draft, setDraft] = useState({ ...custom });
   const [saving, setSaving] = useState(false);
   const [newKey, setNewKey] = useState("");
   const [newVal, setNewVal] = useState("");
   const [showAddKey, setShowAddKey] = useState(false);
+  const [confirmReset, setConfirmReset] = useState(false);
 
   // Sync draft if workspace or prefs change
   useEffect(() => {
-    setDraft({ ...(ws?.custom_copywriting || prefs.custom_copywriting || {}) });
-  }, [ws?.custom_copywriting, prefs.custom_copywriting]);
+    setDraft(getEffectiveCopywriting(ws?.custom_copywriting, prefs?.custom_copywriting));
+  }, [ws?.custom_copywriting, prefs?.custom_copywriting]);
 
   const handleDownloadCsv = () => {
     const csvContent = generateCopywritingCsv(draft);
@@ -185,7 +187,7 @@ function CopywritingSettings() {
       if (keysCount === 0) {
         return toast.error("File CSV kosong atau format tidak sesuai.");
       }
-      const updated = { ...draft, ...parsed };
+      const updated = cleanCopywritingMap({ ...draft, ...parsed });
       setDraft(updated);
       if (isAdmin) {
         await api.put("/workspace", { custom_copywriting: updated });
@@ -203,11 +205,13 @@ function CopywritingSettings() {
   const handleSaveDraft = async () => {
     setSaving(true);
     try {
+      const cleaned = cleanCopywritingMap(draft);
+      setDraft(cleaned);
       if (isAdmin) {
-        await api.put("/workspace", { custom_copywriting: draft });
+        await api.put("/workspace", { custom_copywriting: cleaned });
         reloadWs();
       }
-      await savePrefs({ custom_copywriting: draft });
+      await savePrefs({ custom_copywriting: cleaned });
       toast.success(isAdmin ? "Copywriting berhasil disimpan ke seluruh workspace! ✨" : "Copywriting berhasil disimpan!");
     } catch (err) {
       toast.error("Gagal menyimpan copywriting");
@@ -217,9 +221,9 @@ function CopywritingSettings() {
   };
 
   const handleReset = async () => {
-    if (!window.confirm("Kembalikan semua copywriting ke teks default aplikasi?")) return;
     try {
       setDraft({});
+      setConfirmReset(false);
       if (isAdmin) {
         await api.put("/workspace", { custom_copywriting: {} });
         reloadWs();
@@ -243,20 +247,25 @@ function CopywritingSettings() {
   };
 
   const allKeys = Array.from(new Set([...Object.keys(DEFAULT_COPYWRITING), ...Object.keys(draft)]));
-  const filteredKeys = allKeys.filter(
-    (k) =>
-      k.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (DEFAULT_COPYWRITING[k] || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (draft[k] || "").toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const activeGroup = COPYWRITING_GROUPS.find((g) => g.id === category);
+  const filteredKeys = allKeys.filter((k) => {
+    if (activeGroup?.match && !activeGroup.match(k)) return false;
+    if (!searchTerm.trim()) return true;
+    const q = searchTerm.toLowerCase();
+    return (
+      k.toLowerCase().includes(q) ||
+      (DEFAULT_COPYWRITING[k] || "").toLowerCase().includes(q) ||
+      (draft[k] || "").toLowerCase().includes(q)
+    );
+  });
 
-  const customCount = Object.keys(draft).filter((k) => draft[k]?.trim()).length;
+  const customCount = Object.keys(draft).filter((k) => String(draft[k] || "").trim()).length;
 
   return (
-    <Card title="Custom Copywriting & Teks Aplikasi" testid="copywriting-card">
+    <Card title={t("settings_copywriting_title", "Custom Copywriting & Teks Aplikasi")} testid="copywriting-card">
       <div className="mb-4 space-y-2">
         <p className="text-xs text-sub">
-          Sesuaikan semua label kolom tabel (Name, Brand, Item, Title, Priority, Status, Status Tenggat), tombol, salam, dan teks copywriting di seluruh aplikasi CIRCLE.
+          {t("settings_copywriting_desc", "Sesuaikan seluruh label navigasi, dashboard, tabel tugas, feed, jadwal, pesan, login, dan teks aplikasi.")}
         </p>
         {isAdmin && (
           <div className="flex items-center gap-2 rounded-xl bg-brand/10 border border-brand/20 px-3 py-2 text-xs font-medium text-brand">
@@ -269,14 +278,14 @@ function CopywritingSettings() {
       {/* Action Toolbar */}
       <div className="flex flex-wrap items-center justify-between gap-3 p-3.5 rounded-2xl bg-surface2/60 border mb-4">
         <div className="flex flex-wrap items-center gap-2">
-          <label className="inline-flex items-center gap-1.5 cursor-pointer rounded-xl bg-brand px-3.5 py-2 text-xs font-bold text-white shadow-sm hover:opacity-90 transition-opacity">
+          <label className="inline-flex h-10 items-center gap-1.5 cursor-pointer rounded-full bg-brand px-4 text-xs sm:text-sm font-semibold text-white shadow-sm hover:opacity-90 transition-opacity">
             <Upload size={14} /> Import CSV
             <input type="file" accept=".csv,text/csv" hidden onChange={handleUploadCsv} data-testid="upload-copywriting-csv" />
           </label>
           <button
             type="button"
             onClick={handleDownloadCsv}
-            className="inline-flex items-center gap-1.5 rounded-xl border bg-surface px-3 py-2 text-xs font-semibold text-ink hover:bg-surface2 transition-colors shadow-xs"
+            className="inline-flex h-10 items-center gap-1.5 rounded-full border bg-surface px-4 text-xs sm:text-sm font-semibold text-ink hover:bg-surface2 transition-colors shadow-xs"
             data-testid="download-copywriting-template"
           >
             <Download size={14} /> Download Template CSV
@@ -284,27 +293,34 @@ function CopywritingSettings() {
           <button
             type="button"
             onClick={() => setShowAddKey((prev) => !prev)}
-            className="inline-flex items-center gap-1.5 rounded-xl border bg-surface px-3 py-2 text-xs font-semibold text-ink hover:bg-surface2 transition-colors shadow-xs"
+            className="inline-flex h-10 items-center gap-1.5 rounded-full border bg-surface px-4 text-xs sm:text-sm font-semibold text-ink hover:bg-surface2 transition-colors shadow-xs"
           >
             <Plus size={14} /> Tambah Key Baru
           </button>
         </div>
 
-        <div className="flex items-center gap-2">
-          {customCount > 0 && (
+        <div className="flex flex-wrap items-center gap-2">
+          {customCount > 0 && !confirmReset && (
             <button
               type="button"
-              onClick={handleReset}
-              className="inline-flex items-center gap-1 text-xs text-rose-500 hover:underline px-2 py-1"
+              onClick={() => setConfirmReset(true)}
+              className="inline-flex h-10 items-center gap-1.5 rounded-full border border-rose-200 dark:border-rose-900/50 bg-rose-50/60 dark:bg-rose-950/30 px-3.5 text-xs font-semibold text-rose-600 dark:text-rose-400 hover:bg-rose-100 transition-colors cursor-pointer"
             >
-              <RotateCcw size={12} /> Reset Kustom
+              <RotateCcw size={12} /> Reset ({customCount})
             </button>
+          )}
+          {confirmReset && (
+            <div className="inline-flex items-center gap-1.5 rounded-full border border-rose-300 bg-rose-50 dark:bg-rose-950/50 px-2.5 py-1">
+              <span className="text-[11px] font-semibold text-rose-700 dark:text-rose-300">Reset semua?</span>
+              <button type="button" onClick={handleReset} className="rounded-full bg-rose-600 px-2.5 py-1 text-[11px] font-bold text-white cursor-pointer">Ya</button>
+              <button type="button" onClick={() => setConfirmReset(false)} className="rounded-full bg-surface px-2.5 py-1 text-[11px] font-semibold text-sub cursor-pointer">Batal</button>
+            </div>
           )}
           <button
             type="button"
             disabled={saving}
             onClick={handleSaveDraft}
-            className="inline-flex items-center gap-1.5 rounded-xl bg-brand text-white px-4 py-2 text-xs font-bold shadow-sm hover:opacity-90 transition-opacity cursor-pointer"
+            className="inline-flex h-10 items-center gap-1.5 rounded-full bg-brand text-white px-4 text-xs sm:text-sm font-semibold shadow-sm hover:opacity-90 transition-opacity cursor-pointer"
             data-testid="save-copywriting-btn"
           >
             <Check size={14} /> {saving ? "Menyimpan..." : "Simpan Copywriting"}
@@ -318,32 +334,55 @@ function CopywritingSettings() {
             value={newKey}
             onChange={(e) => setNewKey(e.target.value)}
             placeholder="Key baru (contoh: col_brand)"
-            className="h-8 flex-1 w-full rounded-xl border bg-surface px-2.5 text-xs font-mono outline-none focus:ring-1 focus:ring-brand"
+            className="h-9 flex-1 w-full rounded-xl border bg-surface px-3 text-xs font-mono outline-none focus:ring-1 focus:ring-brand"
           />
           <input
             value={newVal}
             onChange={(e) => setNewVal(e.target.value)}
             placeholder="Teks copywriting baru"
-            className="h-8 flex-1 w-full rounded-xl border bg-surface px-2.5 text-xs outline-none focus:ring-1 focus:ring-brand"
+            className="h-9 flex-1 w-full rounded-xl border bg-surface px-3 text-xs outline-none focus:ring-1 focus:ring-brand"
           />
           <div className="flex items-center gap-1.5 w-full sm:w-auto justify-end">
             <button
               type="button"
               onClick={handleAddNewKey}
-              className="rounded-xl bg-brand px-3 py-1.5 text-xs font-bold text-white hover:opacity-90 transition-opacity"
+              className="rounded-full bg-brand px-4 h-9 text-xs font-semibold text-white hover:opacity-90 transition-opacity"
             >
               Tambah
             </button>
             <button
               type="button"
               onClick={() => { setShowAddKey(false); setNewKey(""); setNewVal(""); }}
-              className="rounded-xl border bg-surface px-2.5 py-1.5 text-xs text-sub hover:bg-surface2"
+              className="rounded-full border bg-surface px-3.5 h-9 text-xs font-semibold text-sub hover:bg-surface2"
             >
               Batal
             </button>
           </div>
         </div>
       )}
+
+      {/* Category Filter Tabs */}
+      <div className="mb-3 flex items-center gap-1.5 overflow-x-auto pb-1 scroll-thin">
+        {COPYWRITING_GROUPS.map((g) => {
+          const count = g.match ? allKeys.filter(g.match).length : allKeys.length;
+          if (g.id === "custom" && count === 0) return null;
+          const active = category === g.id;
+          return (
+            <button
+              key={g.id}
+              type="button"
+              onClick={() => setCategory(g.id)}
+              className={`inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full px-3 text-xs font-semibold transition-colors cursor-pointer ${
+                active ? "bg-brand text-white shadow-xs" : "border bg-surface text-sub hover:bg-surface2 hover:text-ink"
+              }`}
+              data-testid={`copywriting-cat-${g.id}`}
+            >
+              <span>{g.label}</span>
+              <span className={`text-[10px] ${active ? "text-white/80" : "text-sub/70"}`}>({count})</span>
+            </button>
+          );
+        })}
+      </div>
 
       {/* Search Filter */}
       <div className="relative mb-3">
@@ -357,26 +396,31 @@ function CopywritingSettings() {
       </div>
 
       {/* Keys Table / Editor */}
-      <div className="max-h-96 overflow-y-auto rounded-2xl border divide-y bg-surface text-xs">
+      <div className="max-h-[420px] overflow-y-auto rounded-2xl border divide-y bg-surface text-xs">
         {filteredKeys.length === 0 ? (
           <div className="p-6 text-center text-sub">Tidak ditemukan kata kunci yang cocok</div>
         ) : (
           filteredKeys.map((key) => {
+            const hasDefault = key in DEFAULT_COPYWRITING;
             const defVal = DEFAULT_COPYWRITING[key];
             const currentVal = draft[key] || "";
-            const isCustomized = !!currentVal.trim();
+            const isCustomized = !!String(currentVal).trim();
 
             return (
               <div key={key} className="p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 hover:bg-surface2/50 transition-colors">
                 <div className="sm:w-1/3 min-w-0">
                   <span className="font-mono text-[10px] text-brand block truncate">{key}</span>
-                  <span className="text-sub text-[11px] block mt-0.5">Default: "{defVal}"</span>
+                  {hasDefault ? (
+                    <span className="text-sub text-[11px] block mt-0.5 truncate" title={defVal}>Default: &ldquo;{defVal}&rdquo;</span>
+                  ) : (
+                    <span className="inline-block mt-0.5 rounded bg-brand/10 px-1.5 py-0.5 text-[10px] font-semibold text-brand">Key Kustom</span>
+                  )}
                 </div>
                 <div className="sm:w-2/3 flex items-center gap-2">
                   <input
                     value={currentVal}
                     onChange={(e) => setDraft({ ...draft, [key]: e.target.value })}
-                    placeholder={defVal}
+                    placeholder={hasDefault ? defVal : "Masukkan teks kustom..."}
                     className={`h-8 w-full rounded-lg border px-2.5 text-xs outline-none transition-colors ${
                       isCustomized ? "border-brand bg-brand/5 text-ink font-semibold" : "bg-surface2 text-sub"
                     }`}
@@ -406,7 +450,7 @@ function CopywritingSettings() {
 }
 
 export default function Settings() {
-  const { isAdmin, isManager } = useApp();
+  const { isAdmin, isManager, t } = useApp();
   const tabs = [
     ["profile", "Data Diri Lengkap"],
     ["notifications", "Notifications"],
@@ -420,7 +464,7 @@ export default function Settings() {
   const [tab, setTab] = useState("profile");
   return (
     <div className="mx-auto max-w-5xl px-4 py-6 sm:px-6 lg:px-10 lg:py-10 animate-crossfade" data-testid="settings-page">
-      <PageHeader icon={Cog} title="Settings" subtitle="Personalize CIRCLE and manage your workspace." />
+      <PageHeader icon={Cog} title={t("settings_title", "Settings")} subtitle={t("settings_subtitle", "Personalize CIRCLE and manage your workspace.")} />
       <div className="mb-5 w-full">
         <PWAInstallButton variant="card" />
       </div>

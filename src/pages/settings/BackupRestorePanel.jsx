@@ -20,7 +20,7 @@ import {
 import { toast } from "sonner";
 import { api, errMsg } from "../../lib/api";
 import { useApp } from "../../context/AppContext";
-import { googleSignIn } from "../../lib/auth";
+import { googleBasicSignIn } from "../../lib/auth";
 import {
   subscribeFirebaseAuth,
   saveBackupToFirestore,
@@ -233,10 +233,10 @@ export default function BackupRestorePanel() {
     setConnectingGoogle(true);
     setCloudError("");
     try {
-      await googleSignIn();
+      await googleBasicSignIn();
       toast.success("Akun Google terhubung untuk Cloud Backup!");
     } catch (e) {
-      toast.error("Gagal menghubungkan akun Google. Pastikan popup tidak diblokir browser.");
+      toast.error("Gagal menghubungkan Google OAuth (pastikan popup tidak diblokir dan email terdaftar sebagai Test User di Google Cloud Console).");
     } finally {
       setConnectingGoogle(false);
     }

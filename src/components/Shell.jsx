@@ -58,7 +58,7 @@ const MOBILE_TABS = [
 function NavItem({ item, compact, unread, onClick }) {
   const { t } = useApp();
   const Icon = item.icon;
-  const label = t(`nav_${item.id}`) || item.label;
+  const label = t(`nav_${item.id}`, item.label);
   return (
     <NavLink
       to={item.to}
@@ -211,7 +211,7 @@ function Sidebar({ compact, setCompact, openSearch }) {
             onClick={logout}
             className="btn-ghost flex h-8 w-8 items-center justify-center rounded-lg text-sub hover:text-rose-600 transition-colors"
             aria-label="Log out"
-            title="Keluar"
+            title={t("nav_logout", "Keluar Akun")}
             data-testid="logout-btn"
           >
             <LogOut size={16} />
@@ -225,7 +225,7 @@ function Sidebar({ compact, setCompact, openSearch }) {
 function MobileNav({ openSearch }) {
   const [more, setMore] = useState(false);
   const [soundOn, setSoundOn] = useState(() => isSoundEnabled());
-  const { unread, me, logout, ws, savePrefs, isDemo } = useApp();
+  const { unread, me, logout, ws, savePrefs, isDemo, t } = useApp();
   const loc = useLocation();
   const navigate = useNavigate();
   const dark = document.documentElement.classList.contains("dark");
@@ -238,7 +238,7 @@ function MobileNav({ openSearch }) {
   };
 
   const currentNav = NAV.find((n) => (n.to === "/" ? loc.pathname === "/" : loc.pathname.startsWith(n.to)));
-  const activeTitle = currentNav?.label || ws?.brand_name || "CIRCLE";
+  const activeTitle = currentNav ? t(`nav_${currentNav.id}`, currentNav.label) : (ws?.brand_name || "CIRCLE");
 
   const collabItems = NAV.filter((n) => ["schedule", "directory", "groups"].includes(n.id));
   const orgItems = NAV.filter((n) => ["employee", "org", "projects"].includes(n.id));
@@ -318,7 +318,7 @@ function MobileNav({ openSearch }) {
                   <span className="absolute top-0 h-0.5 w-7 rounded-full bg-brand" />
                 )}
                 <n.icon size={20} strokeWidth={isActive ? 2.4 : 2} />
-                <span className="text-[10px] tracking-tight leading-none">{n.label}</span>
+                <span className="text-[10px] tracking-tight leading-none">{t(`nav_${n.id}`, n.label)}</span>
               </>
             )}
           </NavLink>
@@ -332,7 +332,7 @@ function MobileNav({ openSearch }) {
           data-testid="mobile-nav-more"
         >
           <Menu size={20} />
-          <span className="text-[10px] tracking-tight leading-none">Menu</span>
+          <span className="text-[10px] tracking-tight leading-none">{t("nav_menu", "Menu")}</span>
         </button>
       </nav>
 
@@ -368,7 +368,7 @@ function MobileNav({ openSearch }) {
                 </div>
               </div>
               <span className="inline-flex items-center gap-1 text-xs font-semibold text-brand shrink-0">
-                Profil <ChevronRight size={14} />
+                {t("nav_profile", "Profil")} <ChevronRight size={14} />
               </span>
             </button>
 
@@ -396,7 +396,7 @@ function MobileNav({ openSearch }) {
                     }
                   >
                     <n.icon size={20} className="text-brand" />
-                    <span className="truncate max-w-full">{n.label}</span>
+                    <span className="truncate max-w-full">{t(`nav_${n.id}`, n.label)}</span>
                   </NavLink>
                 ))}
               </div>
@@ -423,7 +423,7 @@ function MobileNav({ openSearch }) {
                     }
                   >
                     <n.icon size={20} className="text-brand" />
-                    <span className="truncate max-w-full">{n.label}</span>
+                    <span className="truncate max-w-full">{t(`nav_${n.id}`, n.label)}</span>
                   </NavLink>
                 ))}
               </div>
@@ -444,7 +444,7 @@ function MobileNav({ openSearch }) {
                     className="flex h-12 items-center gap-2.5 rounded-2xl border border-slate-200/70 dark:border-slate-800 bg-surface2/60 px-3.5 text-xs font-semibold text-ink hover:bg-surface2"
                   >
                     <n.icon size={18} className="text-brand shrink-0" />
-                    <span>Pengaturan</span>
+                    <span>{t(`nav_${n.id}`, n.label)}</span>
                   </NavLink>
                 ))}
                 <button
@@ -470,7 +470,7 @@ function MobileNav({ openSearch }) {
                   className="flex h-12 items-center gap-2.5 rounded-2xl border border-rose-200 dark:border-rose-900/50 bg-rose-50/60 dark:bg-rose-950/30 px-3.5 text-xs font-semibold text-rose-600 dark:text-rose-400"
                 >
                   <LogOut size={18} className="shrink-0" />
-                  <span>Keluar Akun</span>
+                  <span>{t("nav_logout", "Keluar Akun")}</span>
                 </button>
               </div>
             </div>
@@ -510,9 +510,9 @@ export default function Shell() {
       <OfflineIndicator />
       <div className="flex min-h-screen w-full bg-background overflow-x-hidden">
         <Sidebar compact={compact} setCompact={setCompact} openSearch={() => setSearch(true)} />
-        <div className={`flex min-w-0 flex-1 flex-col transition-[margin] duration-200 ${compact ? "md:ml-[76px]" : "md:ml-[248px]"} ${notifOpen ? "md:mr-[320px] xl:md:mr-[360px]" : "md:mr-[60px]"}`}>
+        <div className={`flex min-w-0 flex-1 flex-col transition-[margin] duration-200 ${compact ? "md:ml-[76px]" : "md:ml-[248px]"} ${notifOpen ? "md:mr-[320px] xl:md:mr-[360px]" : "md:mr-[60px]"} print:!ml-0 print:!mr-0`}>
           {!chatOpen && <MobileNav openSearch={() => setSearch(true)} />}
-          <main className={`min-w-0 flex-1 ${chatOpen ? "" : "pb-20 md:pb-0"}`}>
+          <main className={`min-w-0 flex-1 ${chatOpen ? "" : "pb-20 md:pb-0"} print:!pb-0`}>
             <div className="min-h-full">
               <Outlet />
             </div>

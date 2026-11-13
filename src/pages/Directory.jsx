@@ -1028,7 +1028,7 @@ export function GoogleDriveBrowserDialog({ open, onOpenChange, onSelectDriveFold
 }
 
 export default function Directory() {
-  const { users, me, subscribe } = useApp();
+  const { users, me, subscribe, t } = useApp();
 
   // 0ms Instant Hydrated Drive Shortcuts State
   const [shortcuts, setShortcuts] = useState(() => getCachedDriveShortcuts());
@@ -1187,7 +1187,7 @@ export default function Directory() {
     >
       <PageHeader
         icon={HardDrive}
-        title="Directory"
+        title={t("directory_title", "Directory")}
         subtitle={`${accessibleShortcutsCount} shortcut folder Google Drive dapat Anda akses · Terhubung langsung ke Google Drive & otomatis tampil di Dashboard sesuai hak akses member`}
       />
 
@@ -1206,7 +1206,7 @@ export default function Directory() {
           className="h-10 shrink-0 whitespace-nowrap text-xs sm:text-sm px-3.5 sm:px-4"
           data-testid="add-drive-shortcut-btn"
         >
-          <Plus size={15} /> Tambah Shortcut
+          <Plus size={15} /> {t("directory_add_btn", "Tambah Shortcut")}
         </AccentButton>
 
         {/* 2. Connect ke GDrive */}
@@ -1215,7 +1215,7 @@ export default function Directory() {
           className="h-10 shrink-0 whitespace-nowrap text-xs sm:text-sm px-3.5 sm:px-4"
           data-testid="connect-google-drive-btn"
         >
-          <HardDrive size={15} className="text-brand" /> Connect Google Drive
+          <HardDrive size={15} className="text-brand" /> {t("directory_connect_btn", "Connect Google Drive")}
         </GhostButton>
 
         {/* 3. Filter (Berisi Semua Kategori, Divisi, & Akses Saya / Semua Folder) */}

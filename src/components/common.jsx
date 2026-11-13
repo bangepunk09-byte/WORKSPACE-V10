@@ -312,7 +312,7 @@ export function AccentButton({ children, className = "", ...p }) {
   return <button className={`btn-accent inline-flex h-10 items-center justify-center gap-2 px-4 text-sm font-semibold disabled:opacity-50 ${className}`} {...p}>{children}</button>;
 }
 export function GhostButton({ children, className = "", ...p }) {
-  return <button className={`btn-ghost inline-flex h-10 items-center justify-center gap-2 border bg-surface px-4 text-sm font-medium disabled:opacity-50 ${className}`} {...p}>{children}</button>;
+  return <button className={`btn-ghost inline-flex h-10 items-center justify-center gap-2 border bg-surface px-4 text-sm font-semibold disabled:opacity-50 ${className}`} {...p}>{children}</button>;
 }
 
 export const ROLE_NAMES = { super_admin: "Super Admin", workspace_admin: "Workspace Admin", department_manager: "Department Manager", project_manager: "Project Manager", employee: "Employee" };

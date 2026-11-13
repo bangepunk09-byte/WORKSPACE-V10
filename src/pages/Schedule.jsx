@@ -300,6 +300,24 @@ export default function Schedule() {
     });
   }, [subscribe, updateMeetingsList]);
 
+  const handleConnectWorkspaceFallback = async () => {
+    setIsLoggingIn(true);
+    try {
+      setManualGoogleAuth(me || { email: "be.creativestudio21@gmail.com", name: "Super Admin" });
+      setNeedsAuth(false);
+      const { data } = await api.post("/meetings/connect-gcal", { email: me?.email || "be.creativestudio21@gmail.com" });
+      if (Array.isArray(data?.events)) {
+        updateMeetingsList(data.events);
+      }
+      setLastSyncedAt(new Date());
+      toast.success(`Jadwal Workspace (${me?.email || "Circle"}) berhasil disinkronkan!`);
+    } catch (err) {
+      toast.error(errMsg(err, "Gagal menghubungkan jadwal Workspace"));
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
+
   const handleConnectGoogleCalendar = async () => {
     setIsLoggingIn(true);
     try {
@@ -310,23 +328,10 @@ export default function Schedule() {
         return;
       }
     } catch {
-      // If iframe preview blocks popup or domain is restricted, connect seamlessly with workspace user's Google account
+      // If iframe preview blocks popup or Google OAuth Testing Mode returns Error 403, connect seamlessly with workspace user's account
     }
 
-    try {
-      setManualGoogleAuth(me || { email: "be.creativestudio21@gmail.com", name: "Super Admin" });
-      setNeedsAuth(false);
-      const { data } = await api.post("/meetings/connect-gcal", { email: me?.email || "be.creativestudio21@gmail.com" });
-      if (Array.isArray(data?.events)) {
-        updateMeetingsList(data.events);
-      }
-      setLastSyncedAt(new Date());
-      toast.success(`Google Calendar (${me?.email || "Workspace"}) berhasil terhubung & disinkronkan!`);
-    } catch (err) {
-      toast.error(errMsg(err, "Gagal menghubungkan Google Calendar"));
-    } finally {
-      setIsLoggingIn(false);
-    }
+    await handleConnectWorkspaceFallback();
   };
 
   const openCreateDialog = (prefillDate) => {
@@ -573,71 +578,84 @@ export default function Schedule() {
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {needsAuth ? (
-            <button
-              type="button"
-              onClick={handleConnectGoogleCalendar}
-              disabled={isLoggingIn}
-              className="gsi-material-button flex h-10 items-center gap-2.5 rounded-full border bg-white px-4 text-xs font-bold text-slate-800 shadow-xs hover:bg-slate-50 transition-colors cursor-pointer disabled:opacity-50"
-              data-testid="connect-gcal-btn"
-            >
-              <div className="gsi-material-button-state" />
-              <div className="gsi-material-button-content-wrapper flex items-center gap-2">
-                <div className="gsi-material-button-icon h-4 w-4 shrink-0">
-                  <svg version="1.1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" style={{ display: "block" }}>
-                    <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />
-                    <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z" />
-                    <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z" />
-                    <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z" />
-                    <path fill="none" d="M0 0h48v48H0z" />
-                  </svg>
+            <>
+              <button
+                type="button"
+                onClick={handleConnectGoogleCalendar}
+                disabled={isLoggingIn}
+                className="gsi-material-button inline-flex h-10 items-center justify-center gap-2 rounded-full border bg-white px-4 text-sm font-semibold text-slate-800 shadow-xs hover:bg-slate-50 transition-colors cursor-pointer disabled:opacity-50"
+                data-testid="connect-gcal-btn"
+              >
+                <div className="gsi-material-button-state" />
+                <div className="gsi-material-button-content-wrapper flex items-center gap-2">
+                  <div className="gsi-material-button-icon h-4 w-4 shrink-0">
+                    <svg version="1.1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" style={{ display: "block" }}>
+                      <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />
+                      <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z" />
+                      <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z" />
+                      <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z" />
+                      <path fill="none" d="M0 0h48v48H0z" />
+                    </svg>
+                  </div>
+                  <span className="gsi-material-button-contents">
+                    {isLoggingIn ? "Menghubungkan..." : "Sign in with Google"}
+                  </span>
                 </div>
-                <span className="gsi-material-button-contents">
-                  {isLoggingIn ? "Menghubungkan..." : "Sign in with Google"}
-                </span>
-              </div>
-            </button>
+              </button>
+              <GhostButton
+                type="button"
+                onClick={handleConnectWorkspaceFallback}
+                disabled={isLoggingIn}
+                className="cursor-pointer"
+                title="Gunakan ini jika muncul Error 403 (Testing Mode) pada popup Google"
+                data-testid="connect-workspace-gcal-btn"
+              >
+                <RefreshCw size={15} className="text-brand" />
+                Sync Akun Workspace
+              </GhostButton>
+            </>
           ) : (
-            <button
+            <GhostButton
               type="button"
               onClick={() => syncFromGoogleCalendar({ silent: false })}
               disabled={syncingGCal}
-              className="flex h-9 items-center gap-1.5 rounded-full border bg-surface2 px-3.5 text-xs font-semibold text-ink hover:bg-border/60 transition-colors cursor-pointer disabled:opacity-50"
+              className="bg-surface2 text-ink font-semibold hover:bg-border/60 cursor-pointer"
               data-testid="sync-gcal-now-btn"
             >
-              <RefreshCw size={13} className={syncingGCal ? "animate-spin text-brand" : "text-brand"} />
+              <RefreshCw size={15} className={syncingGCal ? "animate-spin text-brand" : "text-brand"} />
               {syncingGCal ? "Menyinkronkan..." : "Sync Sekarang"}
-            </button>
+            </GhostButton>
           )}
         </div>
       </div>
 
       {/* Mini Calendar Strip */}
       <div className="mb-6 rounded-3xl border bg-surface p-2 shadow-sm">
-        <div className="mb-3 flex items-center justify-between px-1">
-          <p className="text-sm font-bold text-ink">Minggu Ini</p>
-          <div className="flex rounded-xl bg-surface2 p-1 text-xs">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2 px-1">
+          <p className="text-sm font-bold text-ink">{t("schedule_this_week", "Minggu Ini")}</p>
+          <div className="inline-flex h-10 items-center gap-0.5 rounded-full border bg-surface2/80 p-1">
             <button
               type="button"
               onClick={() => { setViewMode("all"); setSelectedDate(null); }}
-              className={`rounded-lg px-3 py-1 font-semibold ${viewMode === "all" ? "bg-surface shadow text-ink" : "text-sub hover:text-ink"}`}
+              className={`inline-flex h-8 items-center justify-center rounded-full px-4 text-sm font-semibold transition-all cursor-pointer ${viewMode === "all" ? "bg-brand text-white shadow-xs" : "text-sub hover:text-ink hover:bg-surface"}`}
             >
-              Semua
+              {t("schedule_filter_all", "Semua")}
             </button>
             <button
               type="button"
               onClick={() => { setViewMode("today"); setSelectedDate(todayStr); }}
-              className={`rounded-lg px-3 py-1 font-semibold ${viewMode === "today" ? "bg-surface shadow text-ink" : "text-sub hover:text-ink"}`}
+              className={`inline-flex h-8 items-center justify-center rounded-full px-4 text-sm font-semibold transition-all cursor-pointer ${viewMode === "today" ? "bg-brand text-white shadow-xs" : "text-sub hover:text-ink hover:bg-surface"}`}
             >
-              Hari Ini
+              {t("schedule_filter_today", "Hari Ini")}
             </button>
             <button
               type="button"
               onClick={() => { setViewMode("upcoming"); setSelectedDate(null); }}
-              className={`rounded-lg px-3 py-1 font-semibold ${viewMode === "upcoming" ? "bg-surface shadow text-ink" : "text-sub hover:text-ink"}`}
+              className={`inline-flex h-8 items-center justify-center rounded-full px-4 text-sm font-semibold transition-all cursor-pointer ${viewMode === "upcoming" ? "bg-brand text-white shadow-xs" : "text-sub hover:text-ink hover:bg-surface"}`}
             >
-              Mendatang
+              {t("schedule_filter_upcoming", "Mendatang")}
             </button>
           </div>
         </div>
@@ -691,24 +709,24 @@ export default function Schedule() {
           <h2 className="text-sm font-bold text-ink flex items-center gap-2">
             <span>
               {viewMode === "date" && selectedDate
-                ? `Pertemuan: ${selectedDate === todayStr ? "Hari Ini" : selectedDate}`
+                ? `Pertemuan: ${selectedDate === todayStr ? t("schedule_filter_today", "Hari Ini") : selectedDate}`
                 : viewMode === "today"
-                ? "Pertemuan Hari Ini"
+                ? t("schedule_today_meetings", "Pertemuan Hari Ini")
                 : viewMode === "upcoming"
-                ? "Pertemuan Mendatang"
-                : "Semua Pertemuan"}
+                ? t("schedule_upcoming_meetings", "Pertemuan Mendatang")
+                : t("schedule_all_meetings", "Semua Pertemuan")}
             </span>
             <span className="rounded-full bg-surface2 px-2.5 py-0.5 text-xs text-sub font-semibold">
               {filteredMeetings.length}
             </span>
           </h2>
-          <button
+          <GhostButton
             type="button"
             onClick={() => openCreateDialog(selectedDate || todayStr)}
-            className="flex items-center gap-1 text-xs font-semibold text-brand hover:underline"
+            className="font-semibold text-brand cursor-pointer"
           >
-            <Plus size={13} /> Tambah untuk {selectedDate || "Hari Ini"}
-          </button>
+            <Plus size={16} /> Tambah untuk {selectedDate || t("schedule_filter_today", "Hari Ini")}
+          </GhostButton>
         </div>
 
         {filteredMeetings.length === 0 ? (
@@ -716,16 +734,17 @@ export default function Schedule() {
             <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-surface2 text-sub">
               <CalendarIcon size={28} />
             </div>
-            <h3 className="mt-4 text-sm font-bold">Tidak ada meeting yang dijadwalkan</h3>
+            <h3 className="mt-4 text-sm font-bold">{t("schedule_empty_title", "Tidak ada meeting yang dijadwalkan")}</h3>
             <p className="mt-1 max-w-sm text-xs text-sub">
-              Jadwalkan rapat bersama tim sekarang. Langsung terintegrasi otomatis dengan Google Calendar.
+              {t("schedule_empty_desc", "Jadwalkan rapat bersama tim sekarang. Langsung terintegrasi otomatis dengan Google Calendar.")}
             </p>
-            <button
-              onClick={() => openCreateDialog()}
-              className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-brand px-4 py-2 text-xs font-semibold text-white shadow hover:opacity-90 transition-opacity"
+            <AccentButton
+              type="button"
+              onClick={() => openCreateDialog(selectedDate || todayStr)}
+              className="mt-4"
             >
-              <Plus size={14} /> Buat Jadwal Rapat
-            </button>
+              <Plus size={16} /> {t("schedule_create_btn", "Buat Jadwal Rapat")}
+            </AccentButton>
           </div>
         ) : (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -817,16 +836,16 @@ export default function Schedule() {
                         className="btn-accent flex-1 flex items-center justify-center gap-2 h-10 rounded-full px-4 text-sm font-semibold text-white shadow-sm hover:opacity-90 transition-opacity"
                         data-testid={`join-meet-${m.id}`}
                       >
-                        <Video size={15} /> Join Google Meet
+                        <Video size={16} /> Join Google Meet
                       </a>
                     ) : m.html_link ? (
                       <a
                         href={m.html_link}
                         target="_blank"
                         rel="noreferrer"
-                        className="flex-1 flex items-center justify-center gap-1.5 h-10 rounded-full border bg-surface2 px-4 text-xs font-semibold text-ink hover:bg-border/60 transition-colors"
+                        className="flex-1 flex items-center justify-center gap-2 h-10 rounded-full border bg-surface2 px-4 text-sm font-semibold text-ink hover:bg-border/60 transition-colors"
                       >
-                        <ExternalLink size={14} /> Buka di Google Calendar
+                        <ExternalLink size={16} /> Buka di Google Calendar
                       </a>
                     ) : (
                       <div className="flex-1 text-center py-2 text-xs font-medium text-sub">
@@ -884,20 +903,20 @@ export default function Schedule() {
                     <button
                       type="button"
                       onClick={() => setForm({ ...form, location_type: "online", location: "Google Meet" })}
-                      className={`flex items-center justify-center gap-1.5 rounded-xl border p-2 text-xs font-semibold transition-colors ${
+                      className={`flex h-10 items-center justify-center gap-2 rounded-full border px-4 text-sm font-semibold transition-colors ${
                         form.location_type === "online" ? "border-brand bg-brand/10 text-brand" : "bg-surface2 text-sub"
                       }`}
                     >
-                      <Video size={13} /> Google Meet
+                      <Video size={15} /> Google Meet
                     </button>
                     <button
                       type="button"
                       onClick={() => setForm({ ...form, location_type: "offline", location: "Ruang Rapat Utama" })}
-                      className={`flex items-center justify-center gap-1.5 rounded-xl border p-2 text-xs font-semibold transition-colors ${
+                      className={`flex h-10 items-center justify-center gap-2 rounded-full border px-4 text-sm font-semibold transition-colors ${
                         form.location_type === "offline" ? "border-brand bg-brand/10 text-brand" : "bg-surface2 text-sub"
                       }`}
                     >
-                      <MapPin size={13} /> Tatap Muka
+                      <MapPin size={15} /> Tatap Muka
                     </button>
                   </div>
                 </div>

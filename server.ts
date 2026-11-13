@@ -2690,8 +2690,14 @@ async function startServer() {
     // Access control: Division-restricted access + invited board members + assigned users
     list = list.filter((t: any) => isTaskAccessible(t, user));
 
-    // Always compute status compliance automatically (if Done after deadline -> Overdue)
+    // Always compute status compliance automatically (if Done after deadline -> Overdue) and normalize requestor fields
     list.forEach((t: any) => {
+      const reqIds = Array.isArray(t.requestor_ids) && t.requestor_ids.length
+        ? t.requestor_ids
+        : (t.requestor_id ? [t.requestor_id] : (t.created_by ? [t.created_by] : []));
+      t.requestor_ids = reqIds;
+      t.requestor_id = reqIds[0] || t.created_by || null;
+
       const isDone = t.status === "done";
       if (isDone) {
         if (!t.completed_at) t.completed_at = t.updated_at || new Date().toISOString();
@@ -2762,7 +2768,6 @@ async function startServer() {
     const t = {
       id: newTaskId,
       number_str: taskNum,
-      department: resolvedDept,
       comments: [],
       subtasks: [],
       attachments: [],
@@ -2771,8 +2776,7 @@ async function startServer() {
       progress,
       archived: false,
       created_by: creatorId,
-      requestor_ids: reqIds,
-      reviewer_ids: reqIds, // Reviewer otomatis sama dengan requestor
+      reviewer_ids: reqIds,
       approvals: {
         needed: 2,
         approved_by: [],
@@ -2782,6 +2786,9 @@ async function startServer() {
       status: resolvedStatus,
       priority: req.body.priority || "medium",
       board_id: resolvedBoardId,
+      department: resolvedDept,
+      requestor_id: reqIds[0] || creatorId,
+      requestor_ids: reqIds,
       assignee_id: primaryAssigneeId,
       assignee_ids: assigneeIds,
       created_at: new Date().toISOString(),
@@ -2862,7 +2869,15 @@ async function startServer() {
 
   // CSV & JSON Task Import Endpoint
   const handleTaskImport = (req: any, res: any) => {
+    syncDivisionsToBoards();
+    const reqUser = getReqUser(req) || currentSessionUser;
+    const actorId = reqUser?.user_id || "user_admin1";
+    const actorName = reqUser?.name || "User";
+
     let items = req.body;
+    const bodyBoardId = req.body && !Array.isArray(req.body) ? String(req.body.board_id || "").trim() : "";
+    const bodyDept = req.body && !Array.isArray(req.body) ? String(req.body.department || "").trim() : "";
+
     if (items && !Array.isArray(items) && Array.isArray(items.items)) {
       items = items.items;
     }
@@ -2872,35 +2887,175 @@ async function startServer() {
     if (!Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ detail: "Tidak ada data task yang valid untuk diimport." });
     }
+
+    const humanUsers = (db.users || []).filter((u: any) => u && !u.is_bot && u.role !== "assistant" && u.user_id !== CIRCLE_BOT_ID);
+    const resolveUserIds = (raw: any): string[] => {
+      const tokens = Array.isArray(raw)
+        ? raw.flatMap((x) => String(x || "").split(/[;,]/))
+        : String(raw || "").split(/[;,]/);
+      const out: string[] = [];
+      tokens.forEach((tok) => {
+        const q = String(tok || "").trim().toLowerCase();
+        if (!q) return;
+        const matched = humanUsers.find(
+          (u: any) =>
+            String(u.user_id || "").toLowerCase() === q ||
+            String(u.email || "").toLowerCase() === q ||
+            String(u.name || "").toLowerCase() === q ||
+            String(u.name || "").split(" ")[0]?.toLowerCase() === q
+        );
+        if (matched && !out.includes(matched.user_id)) out.push(matched.user_id);
+      });
+      return out;
+    };
+
+    const findBoardByHint = (hint: any) => {
+      const q = String(hint || "").trim().toLowerCase();
+      if (!q) return null;
+      const slug = q.replace(/[^a-z0-9]+/g, "_");
+      return (db.boards || []).find(
+        (b: any) =>
+          String(b.id || "").toLowerCase() === q ||
+          String(b.id || "").toLowerCase() === `brd_div_${slug}` ||
+          String(b.department || "").trim().toLowerCase() === q ||
+          String(b.name || "").trim().toLowerCase() === q
+      ) || null;
+    };
+
+    const resolveLabelIds = (item: any): string[] => {
+      if (Array.isArray(item.label_ids) && item.label_ids.length > 0) {
+        return item.label_ids
+          .map((lid: any) => {
+            const q = String(lid || "").trim().toLowerCase();
+            const found = (db.labels || []).find((l: any) => l.id?.toLowerCase() === q || l.name?.toLowerCase() === q);
+            return found?.id || (String(lid).startsWith("lbl_") ? lid : null);
+          })
+          .filter(Boolean);
+      }
+      const rawBrand = item.brand || item.label || item.ip;
+      if (!rawBrand) return [];
+      const parts = Array.isArray(rawBrand) ? rawBrand : String(rawBrand).split(/[;,]/);
+      return parts
+        .map((p: any) => {
+          const q = String(p || "").trim().toLowerCase();
+          if (!q) return null;
+          const found = (db.labels || []).find((l: any) => l.id?.toLowerCase() === q || l.name?.toLowerCase() === q);
+          return found?.id || null;
+        })
+        .filter(Boolean);
+    };
+
+    const defaultBodyBoard = findBoardByHint(bodyBoardId) || findBoardByHint(bodyDept);
+    const userDivBoard = findBoardByHint(reqUser?.department);
+
+    const overrideBoard = Boolean(req.body?.override_board && defaultBodyBoard);
     const createdList: any[] = [];
     items.forEach((item, idx) => {
       if (!item || !item.title || !String(item.title).trim()) return;
-      const taskNum = item.number_str || `TSK-${String(db.tasks.length + 1).padStart(3, '0')}`;
-      const reqIds = item.requestor_ids || [currentSessionUser?.user_id || "user_admin1"];
+
+      const matchedBoard = overrideBoard
+        ? defaultBodyBoard
+        : (
+            findBoardByHint(item.board_id) ||
+            findBoardByHint(item.board) ||
+            findBoardByHint(item.department || item.divisi) ||
+            defaultBodyBoard ||
+            userDivBoard ||
+            db.boards?.[0] ||
+            null
+          );
+
+      const resolvedBoardId = matchedBoard?.id || bodyBoardId || db.boards?.[0]?.id || "brd_div_marketing";
+      const resolvedDept = matchedBoard?.department || (overrideBoard ? bodyDept : (item.department || item.divisi || bodyDept)) || reqUser?.department || "Marketing";
+
+      const resolvedAssignees = resolveUserIds(
+        Array.isArray(item.assignee_ids) && item.assignee_ids.length
+          ? item.assignee_ids
+          : (item.assignee_id || item.assignee || item.assignees || "")
+      );
+      const primaryAssignee = resolvedAssignees[0] || null;
+
+      const resolvedRequestors = resolveUserIds(
+        Array.isArray(item.requestor_ids) && item.requestor_ids.length
+          ? item.requestor_ids
+          : (item.requestor_id || item.requestor || item.created_by || "")
+      );
+      const finalReqIds = resolvedRequestors.length > 0 ? resolvedRequestors : [actorId];
+
+      const validStatuses = (db.workspace?.task_statuses || []).map((s: any) => s.key);
+      const rawStatus = String(item.status || "").toLowerCase().replace(/\s+/g, "_");
+      const resolvedStatus = rawStatus && (validStatuses.length === 0 || validStatuses.includes(rawStatus))
+        ? rawStatus
+        : (validStatuses[0] || "todo");
+
+      const rawCps = Array.isArray(item.checkpoints) ? item.checkpoints : [];
+      const normalizedCps = rawCps.map((cp: any, cpIdx: number) => {
+        if (typeof cp === "string") {
+          return { id: `cp_imp_${Date.now()}_${idx}_${cpIdx}`, title: cp, assignee_id: null, deadline: "", done: false };
+        }
+        const cpPic = cp.assignee_id ? (resolveUserIds(cp.assignee_id)[0] || cp.assignee_id) : null;
+        return {
+          id: cp.id || `cp_imp_${Date.now()}_${idx}_${cpIdx}`,
+          title: cp.title || `Checkpoint ${cpIdx + 1}`,
+          assignee_id: cpPic,
+          deadline: cp.deadline || "",
+          done: !!cp.done,
+          done_at: cp.done_at || null,
+          done_by: cp.done_by || null
+        };
+      });
+
+      const cpPics = normalizedCps.map((c: any) => c.assignee_id).filter(Boolean);
+      const collabs = Array.from(new Set([...(Array.isArray(item.collaborator_ids) ? item.collaborator_ids : []), ...cpPics]));
+
+      const doneCp = normalizedCps.filter((c: any) => c.done).length;
+      const computedProgress = normalizedCps.length > 0
+        ? Math.round((doneCp / normalizedCps.length) * 100)
+        : (item.progress ?? (resolvedStatus === "done" ? 100 : 0));
+
+      const taskNum = item.number_str || `TSK-${String(db.tasks.length + 1).padStart(3, "0")}`;
+      const nowIso = new Date().toISOString();
+
       const t = {
         id: `tsk_${Date.now()}_${idx}_${Math.random().toString(36).slice(2, 6)}`,
         number_str: taskNum,
         title: String(item.title).trim(),
         description: item.description || "",
-        status: item.status || "todo",
-        priority: item.priority || "medium",
-        assignee_id: (Array.isArray(item.assignee_ids) && item.assignee_ids[0]) || item.assignee_id || currentSessionUser?.user_id || "user_admin1",
-        assignee_ids: Array.isArray(item.assignee_ids) && item.assignee_ids.length ? item.assignee_ids : [item.assignee_id || currentSessionUser?.user_id || "user_admin1"],
-        board_id: item.board_id || db.boards?.[0]?.id || "brd_div_marketing",
+        status: resolvedStatus,
+        priority: ["low", "medium", "high", "urgent"].includes(String(item.priority || "").toLowerCase())
+          ? String(item.priority).toLowerCase()
+          : "medium",
+        assignee_id: primaryAssignee,
+        assignee_ids: resolvedAssignees,
+        collaborator_ids: collabs,
+        board_id: resolvedBoardId,
+        department: resolvedDept,
         project_id: item.project_id || null,
-        label_ids: Array.isArray(item.label_ids) ? item.label_ids : ["lbl_1"],
+        label_ids: resolveLabelIds(item),
+        item_type: item.item_type || null,
+        link_url: item.link_url || "",
+        start_date: item.start_date || null,
+        submit_date: item.submit_date || null,
         deadline: item.deadline || new Date(Date.now() + 86400000 * 3).toISOString(),
-        requestor_ids: reqIds,
-        reviewer_ids: reqIds,
+        created_by: finalReqIds[0] || actorId,
+        requestor_id: finalReqIds[0] || actorId,
+        requestor_ids: finalReqIds,
+        reviewer_ids: finalReqIds,
         approvals: { needed: 2, approved_by: [], status: "pending" },
-        checkpoints: Array.isArray(item.checkpoints) ? item.checkpoints : [],
-        progress: item.progress || 0,
+        checkpoints: normalizedCps,
+        progress: computedProgress,
         archived: false,
         comments: [],
         subtasks: [],
         attachments: [],
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
+        activity: [{
+          id: `act_${Date.now()}_${idx}_${Math.random().toString(36).slice(2, 6)}`,
+          actor_id: actorId,
+          action: `mengimpor tugas "${String(item.title).trim()}" ke divisi ${resolvedDept}`,
+          created_at: nowIso
+        }],
+        created_at: nowIso,
+        updated_at: nowIso
       };
       db.tasks.unshift(t);
       createdList.push(t);
@@ -2908,8 +3063,8 @@ async function startServer() {
 
     db.audit_logs.unshift({
       id: `log_${Date.now()}`,
-      actor_id: currentSessionUser?.user_id || "user_admin1",
-      actor_name: currentSessionUser?.name || "User",
+      actor_id: actorId,
+      actor_name: actorName,
       action: `mengimpor ${createdList.length} kartu tugas`,
       created_at: new Date().toISOString()
     });
@@ -2971,16 +3126,54 @@ async function startServer() {
   });
 
   app.get("/api/tasks/export", (req, res) => {
-    const list = db.tasks.filter((t: any) => !t.archived);
+    const user = getReqUser(req) || currentSessionUser;
+    const { board_id, assignee_id, priority, label, department, q, ids } = req.query;
+    let list = db.tasks.filter((t: any) => !t.archived && isTaskAccessible(t, user));
+    if (ids) {
+      const idSet = new Set(String(ids).split(",").map((s) => s.trim()).filter(Boolean));
+      list = list.filter((t: any) => idSet.has(t.id));
+    }
+    if (board_id) list = list.filter((t: any) => t.board_id === board_id);
+    if (department) list = list.filter((t: any) => String(t.department || "").toLowerCase() === String(department).toLowerCase());
+    if (priority) list = list.filter((t: any) => String(t.priority || "").toLowerCase() === String(priority).toLowerCase());
+    if (label) list = list.filter((t: any) => (t.label_ids || []).includes(label));
+    if (assignee_id) list = list.filter((t: any) => t.assignee_id === assignee_id || (Array.isArray(t.assignee_ids) && t.assignee_ids.includes(assignee_id)));
+    if (q) {
+      const ql = String(q).toLowerCase();
+      list = list.filter((t: any) => (t.title || "").toLowerCase().includes(ql) || (t.number_str || "").toLowerCase().includes(ql));
+    }
+
     res.setHeader("X-Record-Count", list.length);
     if (req.query.format === "json") {
       res.setHeader("Content-Type", "application/json");
       res.setHeader("Content-Disposition", 'attachment; filename="circle-tasks.json"');
       return res.send(JSON.stringify(list, null, 2));
     }
-    const headers = "ID,Number,Title,Status,Priority,Assignee,Deadline\n";
-    const rows = list.map((t: any) => `"${t.id}","${t.number_str || ''}","${(t.title || '').replace(/"/g, '""')}","${t.status}","${t.priority}","${t.assignee_id || ''}","${t.deadline || ''}"`).join("\n");
-    res.setHeader("Content-Type", "text/csv");
+    const getUserNames = (uIds: any[]) => (uIds || []).map((uid) => db.users.find((u: any) => u.user_id === uid)?.name || uid).filter(Boolean).join("; ");
+    const esc = (v: any) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+    const headers = "ID,Number,Department,Board,Requestor,Assignee,Brand,Item,Title,Priority,Link,Deadline,Status\n";
+    const rows = list.map((t: any) => {
+      const b = db.boards?.find((x: any) => x.id === t.board_id);
+      const reqIds = Array.isArray(t.requestor_ids) && t.requestor_ids.length ? t.requestor_ids : (t.requestor_id ? [t.requestor_id] : (t.created_by ? [t.created_by] : []));
+      const assIds = Array.isArray(t.assignee_ids) && t.assignee_ids.length ? t.assignee_ids : (t.assignee_id ? [t.assignee_id] : []);
+      const brandNames = (t.label_ids || []).map((lid: string) => db.labels?.find((l: any) => l.id === lid)?.name || lid).join("; ");
+      return [
+        t.id,
+        t.number_str || "",
+        t.department || b?.department || "",
+        b?.name || t.board_id || "",
+        getUserNames(reqIds),
+        getUserNames(assIds),
+        brandNames,
+        t.item_type || "",
+        t.title || "",
+        t.priority || "medium",
+        t.link_url || "",
+        t.deadline || "",
+        t.status || "todo"
+      ].map(esc).join(",");
+    }).join("\n");
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
     res.setHeader("Content-Disposition", 'attachment; filename="circle-tasks.csv"');
     res.send(headers + rows);
   });
@@ -2992,8 +3185,18 @@ async function startServer() {
     if (!isTaskAccessible(t, user)) {
       return res.status(403).json({ detail: "Akses ditolak. Tugas ini hanya dapat diakses oleh divisi terkait atau anggota terundang." });
     }
-    const board = db.boards?.find((b: any) => b.id === t.board_id) || db.boards?.[0] || null;
-    res.json({ ...t, board });
+    const rawBoard = db.boards?.find((b: any) => b.id === t.board_id) || db.boards?.[0] || null;
+    const deptMembers = rawBoard?.department
+      ? (db.users || []).filter((u: any) => !u.is_bot && u.department && u.department.toLowerCase() === rawBoard.department.toLowerCase()).map((u: any) => u.user_id)
+      : [];
+    const board = rawBoard ? {
+      ...rawBoard,
+      member_ids: Array.from(new Set([...deptMembers, ...(Array.isArray(rawBoard.invited_member_ids) ? rawBoard.invited_member_ids : [])]))
+    } : null;
+    const reqIds = Array.isArray(t.requestor_ids) && t.requestor_ids.length
+      ? t.requestor_ids
+      : (t.requestor_id ? [t.requestor_id] : (t.created_by ? [t.created_by] : []));
+    res.json({ ...t, requestor_ids: reqIds, requestor_id: reqIds[0] || t.created_by || null, board });
   });
 
   app.patch("/api/tasks/:id", (req, res) => {
@@ -3052,9 +3255,10 @@ async function startServer() {
       });
     };
 
-    // Reviewer otomatis sinkron dengan requestor
-    if (req.body.requestor_ids) {
+    // Reviewer otomatis sinkron dengan requestor + normalize requestor_id
+    if (Array.isArray(req.body.requestor_ids)) {
       req.body.reviewer_ids = req.body.requestor_ids;
+      req.body.requestor_id = req.body.requestor_ids[0] || t.created_by || null;
     }
 
     // 1. Title change
@@ -3203,13 +3407,13 @@ async function startServer() {
       );
     }
 
-    // 15. Requestor / Reviewer change
+    // 15. Requestor change
     if (Array.isArray(req.body.requestor_ids)) {
       const oldReq = (t.requestor_ids || []).map(getUserName).join(", ") || "Kosong";
       const newReq = req.body.requestor_ids.map(getUserName).join(", ") || "Kosong";
       if (oldReq !== newReq) {
         recordTaskActivity(
-          `memperbarui daftar Requestor & Reviewer`,
+          `memperbarui daftar Requestor`,
           `Dari [${oldReq}] menjadi [${newReq}]`,
           { field: "requestor_ids", from: oldReq, to: newReq }
         );
@@ -3233,7 +3437,7 @@ async function startServer() {
 
     const cpAddedCollaborators: string[] = [];
 
-    // 17. Checkpoint granular tracking (add, delete, rename, PIC change, done/undone)
+    // 17. Checkpoint granular tracking (add, delete, rename, PIC change, deadline change, done/undone)
     if (Array.isArray(req.body.checkpoints)) {
       const oldCheckpoints = t.checkpoints || [];
       const newCheckpoints = req.body.checkpoints;
@@ -3260,6 +3464,9 @@ async function startServer() {
 
       // Modified existing checkpoints
       newCheckpoints.forEach((newCp: any) => {
+        if (newCp.assignee_id && !cpAddedCollaborators.includes(newCp.assignee_id)) {
+          cpAddedCollaborators.push(newCp.assignee_id);
+        }
         const oldCp = oldCheckpoints.find((c: any) => c.id === newCp.id);
         if (!oldCp) return;
 
@@ -3282,6 +3489,14 @@ async function startServer() {
             `mengubah PIC checkpoint "${newCp.title}"`,
             `Dari ${getUserName(oldCp.assignee_id)} ke ${getUserName(newCp.assignee_id)}`,
             { field: "checkpoint_pic", from: getUserName(oldCp.assignee_id), to: getUserName(newCp.assignee_id) }
+          );
+        }
+
+        if ((newCp.deadline || "") !== (oldCp.deadline || "")) {
+          recordTaskActivity(
+            `mengubah deadline checkpoint "${newCp.title}"`,
+            `Dari "${oldCp.deadline || "Kosong"}" menjadi "${newCp.deadline || "Kosong"}"`,
+            { field: "checkpoint_deadline", from: oldCp.deadline || "Kosong", to: newCp.deadline || "Kosong" }
           );
         }
       });
@@ -3510,7 +3725,8 @@ async function startServer() {
     const cp = (t.checkpoints || []).find((c: any) => c.id === req.params.cpId);
     if (!cp || !cp.assignee_id) return res.status(400).json({ detail: "Checkpoint belum memiliki PIC" });
 
-    const actorId = currentSessionUser?.user_id || "user_admin1";
+    const actor = getReqUser(req) || currentSessionUser;
+    const actorId = actor?.user_id || "user_admin1";
     const readyMsg = `Task "${t.title}" sudah siap dikerjakan, Semangat ya..`;
     cp.notified_ready_for = cp.assignee_id;
 
@@ -3547,7 +3763,8 @@ async function startServer() {
     const t = db.tasks.find((x: any) => x.id === req.params.id);
     if (!t) return res.status(404).json({ detail: "Task not found" });
     t.comments = t.comments || [];
-    const actorId = currentSessionUser?.user_id || "user_admin1";
+    const actor = getReqUser(req) || currentSessionUser;
+    const actorId = actor?.user_id || "user_admin1";
     const c = {
       id: `cmt_${Date.now()}`,
       user_id: actorId,
@@ -3580,7 +3797,7 @@ async function startServer() {
       createNotification({
         user_id: userId as string,
         title: isIssue ? "Kendala Dilaporkan pada Tugas" : "Komentar Baru pada Tugas",
-        body: `${currentSessionUser?.name || "Seseorang"} berkomentar di "${t.title}": ${c.text || "Pesan"}`,
+        body: `${actor?.name || "Seseorang"} berkomentar di "${t.title}": ${c.text || "Pesan"}`,
         type: "task_comment",
         category: "tasks",
         actor_id: actorId,
@@ -3599,7 +3816,8 @@ async function startServer() {
     const c = (t.comments || []).find((x: any) => x.id === req.params.commentId);
     if (!c) return res.status(404).json({ detail: "Comment not found" });
 
-    const actorId = currentSessionUser?.user_id || "user_admin1";
+    const actor = getReqUser(req) || currentSessionUser;
+    const actorId = actor?.user_id || "user_admin1";
     Object.assign(c, req.body);
 
     const cp = c.checkpoint_id ? (t.checkpoints || []).find((x: any) => x.id === c.checkpoint_id) : null;
@@ -3729,7 +3947,7 @@ async function startServer() {
       };
     });
 
-    if (isSuper) {
+    if (isSuper || req.query.all === "1" || req.query.scope === "all") {
       return res.json(enriched);
     }
 
@@ -5891,6 +6109,9 @@ async function startServer() {
     const task = db.tasks.find((t: any) => t.id === req.params.id);
     if (!task) return res.status(404).json({ detail: "Task not found" });
     const { conversation_id } = req.body;
+    const actor = getReqUser(req) || currentSessionUser;
+    const actorId = actor?.user_id || "user_admin1";
+    const actorName = actor?.name || "User";
     
     // Set task to in_review and initialize 2-person approval structure
     task.status = "in_review";
@@ -5907,8 +6128,8 @@ async function startServer() {
       const msg = {
         id: `msg_${Date.now()}`,
         conversation_id,
-        sender_id: currentSessionUser?.user_id || "user_admin1",
-        user_id: currentSessionUser?.user_id || "user_admin1",
+        sender_id: actorId,
+        user_id: actorId,
         text: `${task.title} (${task.number_str})`,
         type: "approval_card",
         task_id: task.id,
@@ -5922,7 +6143,7 @@ async function startServer() {
 
     const shareAct = {
       id: `act_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-      actor_id: currentSessionUser?.user_id || "user_admin1",
+      actor_id: actorId,
       action: `mengirimkan preview tugas ke grup untuk review & approval (status: In Review)`,
       task_id: task.id,
       task_title: task.title,
@@ -5934,12 +6155,13 @@ async function startServer() {
 
     db.audit_logs.unshift({
       id: `log_${Date.now()}`,
-      actor_id: currentSessionUser?.user_id || "user_admin1",
-      actor_name: currentSessionUser?.name || "User",
+      actor_id: actorId,
+      actor_name: actorName,
       action: `mengirimkan tugas ${task.number_str} - "${task.title}" ke grup untuk approval`,
       created_at: new Date().toISOString()
     });
 
+    saveDbToFile();
     broadcast({ type: "tasks:changed", task });
     res.json({ success: true, task });
   });
@@ -5949,7 +6171,9 @@ async function startServer() {
     const task = db.tasks.find((t: any) => t.id === req.params.id);
     if (!task) return res.status(404).json({ detail: "Task not found" });
     const { decision, note } = req.body;
-    const userId = currentSessionUser?.user_id || "user_admin1";
+    const actor = getReqUser(req) || currentSessionUser;
+    const userId = actor?.user_id || "user_admin1";
+    const actorName = actor?.name || "User";
 
     task.approvals = task.approvals || {
       needed: 2,
@@ -5989,7 +6213,7 @@ async function startServer() {
         db.audit_logs.unshift({
           id: `log_${Date.now()}`,
           actor_id: userId,
-          actor_name: currentSessionUser?.name || "User",
+          actor_name: actorName,
           action: count === 2
             ? `menyetujui approval (2/2) tugas ${task.number_str} (status otomatis Done)`
             : `menyetujui approval tambahan (${count} orang) tugas ${task.number_str}`,
@@ -6012,13 +6236,13 @@ async function startServer() {
       task.status = "in_progress";
       task.approvals.status = "revised";
       task.approvals.revised_by = userId;
-      task.approvals.revision_note = note || "Mohon periksa kembali dan revisi.";
+      task.approvals.revision_note = note ? String(note) : "";
 
       const revAct = {
         id: `act_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
         actor_id: userId,
         action: `meminta revisi pada tugas (status kembali In Progress)`,
-        detail: `Catatan revisi: "${note || 'Perlu perbaikan'}"`,
+        detail: note ? `Catatan revisi: "${note}"` : `Diskusi revisi dilanjutkan melalui chat`,
         task_id: task.id,
         task_title: task.title,
         created_at: new Date().toISOString()
@@ -6029,8 +6253,8 @@ async function startServer() {
       db.audit_logs.unshift({
         id: `log_${Date.now()}`,
         actor_id: userId,
-        actor_name: currentSessionUser?.name || "User",
-        action: `meminta revisi tugas ${task.number_str}: "${note || 'Perlu perbaikan'}"`,
+        actor_name: actorName,
+        action: `meminta revisi tugas ${task.number_str}${note ? `: "${note}"` : ""}`,
         created_at: new Date().toISOString()
       });
     }
@@ -6046,6 +6270,7 @@ async function startServer() {
       }
     });
 
+    saveDbToFile();
     broadcast({ type: "tasks:changed", task });
     res.json({ success: true, task, approvals: task.approvals });
   });
@@ -6424,7 +6649,8 @@ async function startServer() {
       tagline: db.workspace.tagline,
       logo_file_id: db.workspace.logo_file_id,
       login_image_file_id: db.workspace.login_image_file_id,
-      divisions: db.workspace.divisions || DEFAULT_ALIGNED_DIVISIONS
+      divisions: db.workspace.divisions || DEFAULT_ALIGNED_DIVISIONS,
+      custom_copywriting: db.workspace.custom_copywriting || {}
     });
   });
 

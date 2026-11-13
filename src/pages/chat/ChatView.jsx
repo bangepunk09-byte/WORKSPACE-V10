@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { ArrowLeft, Search, PanelRight, BellOff, Bell, X, Pin, FileText, CheckSquare, UserPlus, LogOut, Archive, Trash2, Shield, MapPin, ShieldCheck, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { api, errMsg, fileUrl } from "../../lib/api";
@@ -234,6 +234,7 @@ export default function ChatView({ cid, onChange, onRead }) {
   const bottom = useRef(null);
   const scroller = useRef(null);
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
   // Synchronously swap state on cid change during render so there is 0ms lag between conversations
   if (prevCid.current !== cid) {
@@ -298,6 +299,34 @@ export default function ChatView({ cid, onChange, onRead }) {
       }
     }).catch(() => {});
   }, [cid, me?.user_id]); // eslint-disable-line
+
+  useEffect(() => {
+    const onPrefill = (ev) => {
+      const detail = ev?.detail || {};
+      if (detail.conversationId && detail.conversationId !== cid) return;
+      if (detail.replyMsg) setReply(detail.replyMsg);
+    };
+    window.addEventListener("circle:composer-prefill", onPrefill);
+    return () => window.removeEventListener("circle:composer-prefill", onPrefill);
+  }, [cid]);
+
+  useEffect(() => {
+    const reviseTask = searchParams.get("reviseTask");
+    if (!reviseTask || !cid) return;
+    const taskNum = searchParams.get("taskNum") || "";
+    const taskTitle = searchParams.get("taskTitle") || "";
+    const label = [taskNum, taskTitle ? `(${taskTitle})` : ""].filter(Boolean).join(" ");
+    const prefillText = `Revisi ${label}: `.replace(/\s+/g, " ");
+    const t = setTimeout(() => {
+      window.dispatchEvent(
+        new CustomEvent("circle:composer-prefill", {
+          detail: { conversationId: cid, text: prefillText }
+        })
+      );
+      navigate(`/messages/${cid}`, { replace: true });
+    }, 60);
+    return () => clearTimeout(t);
+  }, [searchParams, cid, navigate]);
 
   useEffect(() => subscribe((e) => {
     const d = e.data;

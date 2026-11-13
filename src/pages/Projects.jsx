@@ -130,6 +130,7 @@ function Detail({ pid }) {
 }
 
 export default function Projects() {
+  const { t } = useApp();
   const { pid } = useParams();
   const [open, setOpen] = useState(false);
   const [list, setList] = useState(() => {
@@ -161,8 +162,8 @@ export default function Projects() {
   return (
     <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 lg:px-10 lg:py-10 animate-crossfade" data-testid="projects-page">
       {pid ? <Detail pid={pid} /> : <>
-        <PageHeader icon={FolderKanban} title="Projects" subtitle="Progress is calculated from real task data." actions={<AccentButton onClick={() => setOpen(true)} data-testid="new-project-btn"><Plus size={16} />New project</AccentButton>} />
-        {!list.length ? <Empty icon={FolderKanban} title="No projects yet" /> : (
+        <PageHeader icon={FolderKanban} title={t("projects_title", "Projects")} subtitle={t("projects_subtitle", "Progress is calculated from real task data.")} actions={<AccentButton onClick={() => setOpen(true)} data-testid="new-project-btn"><Plus size={16} />{t("projects_new_btn", "New project")}</AccentButton>} />
+        {!list.length ? <Empty icon={FolderKanban} title={t("projects_empty", "No projects yet")} /> : (
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
             {list.map((p, i) => {
               const taskDone = p.task_done || 0;
