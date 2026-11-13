@@ -1,0 +1,152 @@
+{
+  "entities": {
+    "AdminUser": {
+      "title": "AdminUser",
+      "description": "Trusted administrator marker document keyed by Firebase Auth UID.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "minLength": 3,
+          "maxLength": 200
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "email", "createdAt"]
+    },
+    "WorkspaceBackup": {
+      "title": "WorkspaceBackup",
+      "description": "Metadata and summary counts for a full CIRCLE workspace backup snapshot (chatting, tasks, members, feed, projects, boards, settings).",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerEmail": {
+          "type": "string",
+          "format": "email",
+          "minLength": 3,
+          "maxLength": 200
+        },
+        "workspaceName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "version": {
+          "type": "integer"
+        },
+        "chunkCount": {
+          "type": "integer"
+        },
+        "summary": {
+          "type": "object"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "ownerUid",
+        "ownerEmail",
+        "workspaceName",
+        "label",
+        "version",
+        "chunkCount",
+        "summary",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "WorkspaceBackupChunk": {
+      "title": "WorkspaceBackupChunk",
+      "description": "Chunked native map/list payload belonging to a WorkspaceBackup snapshot so large chats, tasks, feeds, and member records stay well below the 1MB Firestore document limit.",
+      "type": "object",
+      "properties": {
+        "backupId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "section": {
+          "type": "string",
+          "enum": ["core", "users", "tasks", "conversations", "messages", "posts", "extra", "uploads"]
+        },
+        "chunkIndex": {
+          "type": "integer"
+        },
+        "payload": {
+          "type": "object"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "backupId",
+        "ownerUid",
+        "section",
+        "chunkIndex",
+        "payload",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/admins/{adminId}": {
+      "schema": { "$ref": "#/entities/AdminUser" },
+      "description": "Admin role marker documents keyed by Firebase Auth UID."
+    },
+    "/workspaceBackups/{backupId}": {
+      "schema": { "$ref": "#/entities/WorkspaceBackup" },
+      "description": "Workspace backup snapshot headers owned by the creating admin or workspace owner."
+    },
+    "/workspaceBackups/{backupId}/chunks/{chunkId}": {
+      "schema": { "$ref": "#/entities/WorkspaceBackupChunk" },
+      "description": "Chunked workspace collections (chats, tasks, members, feed, projects, branding, uploads) under each backup snapshot."
+    }
+  }
+}

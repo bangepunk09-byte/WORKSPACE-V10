@@ -1,0 +1,220 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Global Default-Deny Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 2. Hardened Global Helpers
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isAdmin() {
+      return isVerifiedUser() && (
+        request.auth.token.email == 'bangepunk09@gmail.com' ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function isValidBackupSummary(summary) {
+      return summary is map &&
+        summary.keys().size() <= 30;
+    }
+
+    function isValidWorkspaceBackup(data, backupId) {
+      return data.keys().hasAll([
+        'id',
+        'ownerUid',
+        'ownerEmail',
+        'workspaceName',
+        'label',
+        'version',
+        'chunkCount',
+        'summary',
+        'createdAt',
+        'updatedAt'
+      ]) &&
+      data.keys().hasOnly([
+        'id',
+        'ownerUid',
+        'ownerEmail',
+        'workspaceName',
+        'label',
+        'version',
+        'chunkCount',
+        'summary',
+        'createdAt',
+        'updatedAt'
+      ]) &&
+      data.id == backupId &&
+      isValidId(data.id) &&
+      isValidId(data.ownerUid) &&
+      data.ownerEmail is string &&
+      data.ownerEmail.size() >= 3 &&
+      data.ownerEmail.size() <= 200 &&
+      data.workspaceName is string &&
+      data.workspaceName.size() >= 1 &&
+      data.workspaceName.size() <= 120 &&
+      data.label is string &&
+      data.label.size() >= 1 &&
+      data.label.size() <= 120 &&
+      data.version is int &&
+      data.version >= 1 &&
+      data.version <= 100 &&
+      data.chunkCount is int &&
+      data.chunkCount >= 0 &&
+      data.chunkCount <= 500 &&
+      isValidBackupSummary(data.summary);
+    }
+
+    function isValidChunkSection(section) {
+      return section in [
+        'core',
+        'users',
+        'tasks',
+        'conversations',
+        'messages',
+        'posts',
+        'extra',
+        'uploads'
+      ];
+    }
+
+    function isValidWorkspaceBackupChunk(data, backupId) {
+      return data.keys().hasAll([
+        'backupId',
+        'ownerUid',
+        'section',
+        'chunkIndex',
+        'payload',
+        'createdAt',
+        'updatedAt'
+      ]) &&
+      data.keys().hasOnly([
+        'backupId',
+        'ownerUid',
+        'section',
+        'chunkIndex',
+        'payload',
+        'createdAt',
+        'updatedAt'
+      ]) &&
+      data.backupId == backupId &&
+      isValidId(data.backupId) &&
+      isValidId(data.ownerUid) &&
+      isValidChunkSection(data.section) &&
+      data.chunkIndex is int &&
+      data.chunkIndex >= 0 &&
+      data.chunkIndex <= 500 &&
+      data.payload is map &&
+      data.payload.keys().size() <= 30;
+    }
+
+    // 3. Admins Collection (Read-only for self/admins, no client privilege escalation)
+    match /admins/{adminId} {
+      allow get: if isVerifiedUser() && isValidId(adminId) && (request.auth.uid == adminId || isAdmin());
+      allow list: if isAdmin();
+      allow create, update, delete: if false;
+    }
+
+    // 4. Workspace Backup Headers
+    match /workspaceBackups/{backupId} {
+      allow get: if isVerifiedUser() && isValidId(backupId) && (existing().ownerUid == request.auth.uid || isAdmin());
+      allow list: if isVerifiedUser() && (existing().ownerUid == request.auth.uid || isAdmin());
+
+      allow create: if isVerifiedUser() &&
+        isValidId(backupId) &&
+        isValidWorkspaceBackup(incoming(), backupId) &&
+        incoming().ownerUid == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+
+      allow update: if isVerifiedUser() &&
+        isValidId(backupId) &&
+        isValidWorkspaceBackup(incoming(), backupId) &&
+        incoming().ownerUid == existing().ownerUid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        (
+          (
+            existing().ownerUid == request.auth.uid &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['workspaceName', 'label', 'version', 'chunkCount', 'summary', 'updatedAt'])
+          ) ||
+          isAdmin()
+        );
+
+      allow delete: if isVerifiedUser() && isValidId(backupId) && (existing().ownerUid == request.auth.uid || isAdmin());
+
+      // 5. Master-Gated Backup Chunks Subcollection
+      match /chunks/{chunkId} {
+        allow get: if isVerifiedUser() &&
+          isValidId(backupId) &&
+          isValidId(chunkId) &&
+          (
+            existing().ownerUid == request.auth.uid ||
+            get(/databases/$(database)/documents/workspaceBackups/$(backupId)).data.ownerUid == request.auth.uid ||
+            isAdmin()
+          );
+
+        allow list: if isVerifiedUser() && (existing().ownerUid == request.auth.uid || isAdmin());
+
+        allow create: if isVerifiedUser() &&
+          isValidId(backupId) &&
+          isValidId(chunkId) &&
+          isValidWorkspaceBackupChunk(incoming(), backupId) &&
+          incoming().ownerUid == request.auth.uid &&
+          incoming().createdAt == request.time &&
+          incoming().updatedAt == request.time &&
+          exists(/databases/$(database)/documents/workspaceBackups/$(backupId)) &&
+          (
+            get(/databases/$(database)/documents/workspaceBackups/$(backupId)).data.ownerUid == request.auth.uid ||
+            isAdmin()
+          );
+
+        allow update: if isVerifiedUser() &&
+          isValidId(backupId) &&
+          isValidId(chunkId) &&
+          isValidWorkspaceBackupChunk(incoming(), backupId) &&
+          incoming().ownerUid == existing().ownerUid &&
+          incoming().backupId == existing().backupId &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().updatedAt == request.time &&
+          (
+            (
+              existing().ownerUid == request.auth.uid &&
+              get(/databases/$(database)/documents/workspaceBackups/$(backupId)).data.ownerUid == request.auth.uid &&
+              incoming().diff(existing()).affectedKeys().hasOnly(['section', 'chunkIndex', 'payload', 'updatedAt'])
+            ) ||
+            isAdmin()
+          );
+
+        allow delete: if isVerifiedUser() &&
+          isValidId(backupId) &&
+          isValidId(chunkId) &&
+          (
+            existing().ownerUid == request.auth.uid ||
+            get(/databases/$(database)/documents/workspaceBackups/$(backupId)).data.ownerUid == request.auth.uid ||
+            isAdmin()
+          );
+      }
+    }
+  }
+}

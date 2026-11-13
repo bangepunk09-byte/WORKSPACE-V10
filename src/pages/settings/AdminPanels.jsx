@@ -1,0 +1,1458 @@
+import { useEffect, useRef, useState } from "react";
+import { Trash2, Plus, ArrowUp, ArrowDown, Upload } from "lucide-react";
+import { toast } from "sonner";
+import { useApp } from "../../context/AppContext";
+import { api, errMsg, uploadFile, fileUrl } from "../../lib/api";
+import { Avatar, LabelChip, ROLE_NAMES, rel, Logo, Spinner } from "../../components/common";
+import { Switch } from "../../components/ui/switch";
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "../../components/ui/select";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "../../components/ui/dialog";
+import { ItemChip, DEFAULT_ITEM_TYPES } from "../tasks/fields";
+
+const inp = "h-10 rounded-xl border bg-surface2 px-3 text-sm outline-none";
+const run = async (fn, msg) => { try { await fn(); if (msg) toast.success(msg); return true; } catch (e) { toast.error(errMsg(e)); return false; } };
+export const Card = ({ title, children, testid }) => <section className="card p-5" data-testid={testid}><h3 className="mb-4 font-bold">{title}</h3>{children}</section>;
+
+const INITIAL_ADMIN_STATS = {
+  total_employees: 5,
+  active_employees: 4,
+  pending_employees: 1,
+  departments: 4,
+  groups: 1,
+  active_projects: 1,
+  open_tasks: 1,
+  overdue_tasks: 0
+};
+
+const INITIAL_AUDIT_LOGS = [
+  { id: "log_1", actor_name: "Admin ASLI RI", action: "memperbarui konfigurasi workspace identity & logo portal", created_at: new Date(Date.now() - 7200000).toISOString() },
+  { id: "log_2", actor_name: "Admin ASLI RI", action: "menghubungkan integrasi Google Workspace (Calendar & Meet)", created_at: new Date(Date.now() - 28800000).toISOString() },
+  { id: "log_3", actor_name: "Siti Rahma", action: "menyetujui approval final (2/2) pada tugas TSK-002", created_at: new Date(Date.now() - 64800000).toISOString() },
+  { id: "log_4", actor_name: "Budi Santoso", action: "menyelesaikan checkpoint 'Audit stats endpoint' pada tugas TSK-002", created_at: new Date(Date.now() - 86400000).toISOString() },
+  { id: "log_5", actor_name: "Admin ASLI RI", action: "menerima permohonan bergabung karyawan baru Dian Pratama", created_at: new Date(Date.now() - 172800000).toISOString() }
+];
+
+let ADMIN_STATS_CACHE = null;
+let AUDIT_LOGS_CACHE = null;
+let USERS_CACHE = null;
+let INVITES_CACHE = null;
+let ACCESS_REQ_CACHE = null;
+let DIVISIONS_CACHE = null;
+let STICKERS_CACHE = null;
+
+try {
+  const sStats = localStorage.getItem("circle_admin_stats");
+  if (sStats) ADMIN_STATS_CACHE = JSON.parse(sStats);
+  const sAudit = localStorage.getItem("circle_admin_audit");
+  if (sAudit) AUDIT_LOGS_CACHE = JSON.parse(sAudit);
+  const sUsers = localStorage.getItem("circle_admin_users");
+  if (sUsers) USERS_CACHE = JSON.parse(sUsers);
+  const sInvites = localStorage.getItem("circle_admin_invites");
+  if (sInvites) INVITES_CACHE = JSON.parse(sInvites);
+  const sAccess = localStorage.getItem("circle_admin_access_reqs");
+  if (sAccess) ACCESS_REQ_CACHE = JSON.parse(sAccess);
+  const sDivs = localStorage.getItem("circle_admin_divisions");
+  if (sDivs) DIVISIONS_CACHE = JSON.parse(sDivs);
+  const sStickers = localStorage.getItem("circle_admin_stickers_data");
+  if (sStickers) STICKERS_CACHE = JSON.parse(sStickers);
+} catch (e) {
+  console.warn("Failed to load admin cache", e);
+}
+
+export function AdminOverview() {
+  const [s, setS] = useState(ADMIN_STATS_CACHE || INITIAL_ADMIN_STATS);
+  const [logs, setLogs] = useState(AUDIT_LOGS_CACHE || INITIAL_AUDIT_LOGS);
+  const [loading, setLoading] = useState(!ADMIN_STATS_CACHE);
+  const { userMap } = useApp();
+
+  useEffect(() => {
+    api.get("/admin/stats").then((r) => { 
+      if (r.data) { 
+        ADMIN_STATS_CACHE = r.data; 
+        setS(r.data); 
+        localStorage.setItem("circle_admin_stats", JSON.stringify(r.data));
+      } 
+    }).catch(() => {});
+    api.get("/admin/audit").then((r) => { 
+      if (Array.isArray(r.data) && r.data.length > 0) { 
+        AUDIT_LOGS_CACHE = r.data; 
+        setLogs(r.data); 
+        localStorage.setItem("circle_admin_audit", JSON.stringify(r.data));
+      } 
+    }).catch(() => {}).finally(() => setLoading(false));
+  }, []);
+
+  const stats = s ? [
+    ["Total employees", s.total_employees],
+    ["Active", s.active_employees],
+    ["Pending approval", s.pending_employees],
+    ["Departments", s.departments],
+    ["Groups", s.groups],
+    ["Active projects", s.active_projects],
+    ["Open tasks", s.open_tasks],
+    ["Overdue tasks", s.overdue_tasks]
+  ] : [];
+
+  return (
+    <div className="space-y-5 animate-crossfade">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4" data-testid="admin-stats">
+        {stats.map(([l, v], i) => (
+          <div
+            key={l}
+            className={`rounded-3xl p-4 transition-all duration-200 hover:shadow-sm ${
+              ["bg-soft-red", "bg-soft-blue", "bg-soft-yellow", "bg-soft-purple", "bg-soft-green"][i % 5]
+            }`}
+          >
+            <p className="text-xs font-semibold text-sub">{l}</p>
+            <p className="mt-2 text-3xl font-bold text-ink">{v}</p>
+          </div>
+        ))}
+      </div>
+
+      <Card title="Recent workspace activity" testid="audit-log">
+        <ul className="max-h-96 space-y-2.5 overflow-y-auto pr-1">
+          {logs.map((l) => (
+            <li key={l.id} className="flex items-center gap-2 text-sm py-1 border-b border-slate-100 dark:border-slate-800/60 last:border-0">
+              <Avatar user={userMap[l.actor_id] || { name: l.actor_name }} size={24} showStatus={false} />
+              <span className="font-bold text-ink">{l.actor_name}</span>
+              <span className="text-sub truncate min-w-0 flex-1">{l.action}</span>
+              <span className="ml-auto text-[11px] text-sub shrink-0">{rel(l.created_at)}</span>
+            </li>
+          ))}
+          {!logs.length && <li className="text-sm text-sub">No admin actions yet.</li>}
+        </ul>
+      </Card>
+    </div>
+  );
+}
+
+export function PeopleAccess() {
+  const { me, ws, users: appUsers, reloadWs, reloadUsers, subscribe } = useApp();
+  const [users, setUsers] = useState(() => USERS_CACHE || appUsers || []);
+  const [invites, setInvites] = useState(INVITES_CACHE || []);
+  const [accessRequests, setAccessRequests] = useState(ACCESS_REQ_CACHE || []);
+  const [loading, setLoading] = useState(false);
+  const [reqFilter, setReqFilter] = useState("all");
+  const [inv, setInv] = useState({ email: "", role: "employee" });
+  const [domains, setDomains] = useState(Array.isArray(ws?.allowed_domains) ? ws.allowed_domains.join(", ") : String(ws?.allowed_domains || ""));
+  useEffect(() => {
+    setDomains(Array.isArray(ws?.allowed_domains) ? ws.allowed_domains.join(", ") : String(ws?.allowed_domains || ""));
+  }, [ws?.allowed_domains]);
+  const [busyAction, setBusyAction] = useState(null);
+  const [deleteTargetUser, setDeleteTargetUser] = useState(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const handleDeleteClick = (userToDelete) => {
+    if (userToDelete.user_id === me?.user_id) {
+      toast.error("Anda tidak dapat menghapus akun Anda sendiri yang sedang aktif.");
+      return;
+    }
+    setDeleteTargetUser(userToDelete);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!deleteTargetUser) return;
+    setIsDeleting(true);
+    try {
+      const res = await api.delete(`/admin/users/${deleteTargetUser.user_id}`);
+      if (res.data?.pending_approval) {
+        toast.success(res.data.detail || `Permohonan hapus ${deleteTargetUser.name} diajukan ke Manajer Divisi.`);
+      } else {
+        toast.success(res.data?.message || `Karyawan ${deleteTargetUser.name} berhasil dihapus.`);
+      }
+      setDeleteTargetUser(null);
+      load();
+      reloadUsers();
+    } catch (e) {
+      toast.error(errMsg(e));
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const load = () => {
+    api.get("/admin/users").then((r) => { 
+      USERS_CACHE = r.data; 
+      setUsers(r.data); 
+      localStorage.setItem("circle_admin_users", JSON.stringify(r.data));
+    }).catch(() => {});
+    api.get("/admin/invitations").then((r) => { 
+      INVITES_CACHE = r.data; 
+      setInvites(r.data); 
+      localStorage.setItem("circle_admin_invites", JSON.stringify(r.data));
+    }).catch(() => {});
+    api.get("/admin/access-requests").then((r) => { 
+      ACCESS_REQ_CACHE = r.data; 
+      setAccessRequests(r.data); 
+      localStorage.setItem("circle_admin_access_reqs", JSON.stringify(r.data));
+    }).catch(() => {}).finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  useEffect(() => {
+    return subscribe((e) => {
+      if (e.type === "access_requests:changed" || e.type === "users:changed") {
+        load();
+      }
+    });
+  }, [subscribe]);
+
+  const upd = (uid, body) => run(() => api.patch(`/admin/users/${uid}`, body), "Updated").then(() => { load(); reloadUsers(); });
+
+  const approveRequest = async (id, role, department) => {
+    setBusyAction(id);
+    try {
+      await api.post(`/admin/access-requests/${id}/approve`, { role, department });
+      toast.success("Permintaan akses berhasil disetujui! Akun sekarang aktif.");
+      load();
+      reloadUsers();
+    } catch (e) {
+      toast.error(errMsg(e));
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const rejectRequest = async (id) => {
+    setBusyAction(id);
+    try {
+      await api.post(`/admin/access-requests/${id}/reject`);
+      toast.info("Permintaan telah ditolak.");
+      load();
+    } catch (e) {
+      toast.error(errMsg(e));
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const pendingCount = accessRequests.filter((r) => r.status === "pending").length;
+  const filteredRequests = accessRequests.filter((r) => {
+    if (reqFilter === "pending") return r.status === "pending";
+    if (reqFilter === "approved") return r.status === "approved";
+    if (reqFilter === "rejected") return r.status === "rejected";
+    return true;
+  });
+
+  return (
+    <div className="space-y-5 animate-crossfade">
+      {/* 1. Access Requests from "Circle" Assistant */}
+      <Card title="Permintaan Akses Masuk" testid="access-requests-card">
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b pb-3">
+            <p className="text-xs text-sub leading-relaxed max-w-md">
+              Karyawan baru atau akun Google yang belum terdaftar dapat mengajukan permintaan login. Permintaan diteruskan melalui Asisten <b className="text-ink">"Circle"</b> berupa Approval Card.
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setReqFilter("all")}
+                className={`h-10 rounded-2xl px-4 text-sm font-semibold transition-colors cursor-pointer ${
+                  reqFilter === "all" ? "bg-brand text-white shadow-xs" : "bg-surface2 text-ink hover:bg-surface2/70"
+                }`}
+              >
+                Semua · {accessRequests.length}
+              </button>
+              <button
+                type="button"
+                onClick={() => setReqFilter("pending")}
+                className={`h-10 rounded-2xl px-4 text-sm font-semibold transition-colors cursor-pointer ${
+                  reqFilter === "pending" ? "bg-amber-500 text-white shadow-xs" : "bg-surface2 text-ink hover:bg-surface2/70"
+                }`}
+              >
+                Menunggu · {pendingCount}
+              </button>
+              <button
+                type="button"
+                onClick={() => setReqFilter("approved")}
+                className={`h-10 rounded-2xl px-4 text-sm font-semibold transition-colors cursor-pointer ${
+                  reqFilter === "approved" ? "bg-emerald-600 text-white shadow-xs" : "bg-surface2 text-ink hover:bg-surface2/70"
+                }`}
+              >
+                Disetujui
+              </button>
+              <button
+                type="button"
+                onClick={() => setReqFilter("rejected")}
+                className={`h-10 rounded-2xl px-4 text-sm font-semibold transition-colors cursor-pointer ${
+                  reqFilter === "rejected" ? "bg-rose-500 text-white shadow-xs" : "bg-surface2 text-ink hover:bg-surface2/70"
+                }`}
+              >
+                Ditolak
+              </button>
+            </div>
+          </div>
+
+          {filteredRequests.length === 0 ? (
+            <div className="py-6 text-center text-xs text-sub">
+              {reqFilter === "pending"
+                ? "Tidak ada permintaan akses yang sedang menunggu persetujuan."
+                : "Belum ada riwayat permohonan akses masuk."}
+            </div>
+          ) : (
+            <div className="divide-y">
+              {filteredRequests.map((r) => {
+                const isPending = r.status === "pending";
+                const isApproved = r.status === "approved";
+                const isRejected = r.status === "rejected";
+                return (
+                  <div key={r.id} className="py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs" data-testid={`req-row-${r.id}`}>
+                    <div className="min-w-0 space-y-0.5">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-sm text-ink">{r.name}</span>
+                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                          isApproved
+                            ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300"
+                            : isRejected
+                            ? "bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300"
+                            : "bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300"
+                        }`}>
+                          {isApproved ? "Disetujui" : isRejected ? "Ditolak" : "Menunggu"}
+                        </span>
+                      </div>
+                      <p className="text-sub truncate">{r.email}</p>
+                      <div className="flex flex-wrap items-center gap-2 text-[11px] text-sub pt-0.5">
+                        <span className="font-medium text-ink">Divisi: <b className="text-brand">{r.department}</b></span>
+                        <span>·</span>
+                        <span>Jabatan: {r.job_title}</span>
+                        {r.note && r.note !== "-" && (
+                          <>
+                            <span>·</span>
+                            <span className="italic truncate max-w-xs">"{r.note}"</span>
+                          </>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 self-start sm:self-auto shrink-0">
+                      {isPending ? (
+                        <>
+                          <button
+                            disabled={busyAction === r.id}
+                            onClick={() => approveRequest(r.id, "employee", r.department)}
+                            className="rounded-full bg-emerald-600 px-3 py-1.5 font-bold text-white hover:bg-emerald-700 shadow-2xs transition-colors disabled:opacity-50"
+                            data-testid={`admin-approve-req-${r.id}`}
+                          >
+                            Setujui
+                          </button>
+                          <button
+                            disabled={busyAction === r.id}
+                            onClick={() => rejectRequest(r.id)}
+                            className="rounded-full border border-rose-300 bg-rose-50 px-3 py-1.5 font-bold text-rose-700 hover:bg-rose-100 dark:bg-rose-950/40 dark:text-rose-300 transition-colors disabled:opacity-50"
+                            data-testid={`admin-reject-req-${r.id}`}
+                          >
+                            Tolak
+                          </button>
+                        </>
+                      ) : (
+                        <div className="text-[11px] text-sub text-right">
+                          {isApproved ? `Disetujui oleh ${r.approved_by || "Admin"}` : `Ditolak oleh ${r.rejected_by || "Admin"}`}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </Card>
+
+      <Card title="Sign-in access" testid="access-settings">
+        <label className="block text-xs font-semibold text-sub">Company email domains<input value={domains} onChange={(e) => setDomains(e.target.value)} className={`${inp} mt-1 w-full`} data-testid="allowed-domains-input" /></label>
+        <label className="mt-3 flex items-center justify-between text-sm">Company-domain accounts join automatically<Switch checked={ws.auto_join_domain !== false} onCheckedChange={(v) => run(() => api.patch("/workspace", { auto_join_domain: v })).then(reloadWs)} data-testid="auto-join-switch" /></label>
+        <label className="mt-3 flex items-center justify-between text-sm">Other accounts go to an approval queue<Switch checked={ws.require_approval !== false} onCheckedChange={(v) => run(() => api.patch("/workspace", { require_approval: v })).then(reloadWs)} data-testid="require-approval-switch" /></label>
+        <button type="button" onClick={() => run(() => api.patch("/workspace", { allowed_domains: String(domains || "").split(",").map((x) => x.trim()).filter(Boolean) }), "Domain berhasil disimpan!").then(reloadWs)} className="btn-accent mt-3 h-10 px-4 text-sm font-semibold" data-testid="save-domains-btn">Save domains</button>
+      </Card>
+
+      <Card title="Invite employee" testid="invite-card">
+        <div className="flex flex-wrap gap-2"><input value={inv.email} onChange={(e) => setInv({ ...inv, email: e.target.value })} placeholder="name@company.com" className={`${inp} min-w-[200px] flex-1`} data-testid="invite-email-input" />
+          <select value={inv.role} onChange={(e) => setInv({ ...inv, role: e.target.value })} className={inp} data-testid="invite-role-select">{Object.entries(ROLE_NAMES).filter(([k]) => me.role === "super_admin" || !["super_admin", "workspace_admin"].includes(k)).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
+          <button onClick={() => run(() => api.post("/admin/invitations", inv), "Invitation saved — they can now sign in with Google").then((ok) => { if (ok) { setInv({ email: "", role: "employee" }); load(); } })} className="btn-accent h-10 px-4 text-sm font-semibold" data-testid="invite-submit-btn">Invite</button></div>
+        <ul className="mt-3 space-y-1">{invites.map((i) => <li key={i.id} className="flex items-center gap-2 text-sm"><span className="flex-1">{i.email}</span><span className="text-xs text-sub">{ROLE_NAMES[i.role]} · {i.used ? "joined" : "pending"}</span><button onClick={() => run(() => api.delete(`/admin/invitations/${i.id}`)).then(load)} className="text-sub" aria-label="Delete invitation"><Trash2 size={14} /></button></li>)}</ul>
+      </Card>
+
+      <Card title="Employees, Divisi & Roles" testid="users-admin">
+        <div className="divide-y">
+          {users
+            .filter((u) => !u.is_bot && u.role !== "assistant" && u.user_id !== "user_circle_assistant")
+            .map((u) => {
+              const allDivs = Array.from(
+                new Set([
+                  ...(ws?.divisions || []),
+                  "Management",
+                  "Engineering",
+                  "Product",
+                  "Design",
+                  "Marketing",
+                  "Sales",
+                  "IT",
+                  "Finance",
+                  "Legal",
+                  "HRGA",
+                  "Operations",
+                  u.department
+                ].filter(Boolean))
+              );
+              return (
+                <div key={u.user_id} className="flex flex-wrap items-center justify-between gap-3 py-3.5" data-testid={`admin-user-${u.user_id}`}>
+                  <div className="flex items-center gap-3 min-w-[180px]">
+                    <Avatar user={u} size={36} showStatus={false} />
+                    <span className="text-sm font-bold text-ink">{u.name}</span>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Select
+                      value={u.department || "Management"}
+                      onValueChange={(val) => upd(u.user_id, { department: val })}
+                    >
+                      <SelectTrigger className="h-9 w-36 rounded-xl bg-surface2 border-slate-200 dark:border-slate-800 text-xs font-medium" data-testid={`dept-select-${u.user_id}`}>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {allDivs.map((d) => (
+                          <SelectItem key={d} value={d}>Divisi: {d}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+
+                    <Select
+                      value={u.role}
+                      onValueChange={(val) => upd(u.user_id, { role: val })}
+                    >
+                      <SelectTrigger className="h-9 w-36 rounded-xl bg-surface2 border-slate-200 dark:border-slate-800 text-xs font-medium" data-testid={`role-select-${u.user_id}`}>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {Object.entries(ROLE_NAMES).map(([k, l]) => (
+                          <SelectItem key={k} value={k}>{l}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+
+                    <Select
+                      value={u.status}
+                      onValueChange={(val) => upd(u.user_id, { status: val })}
+                      disabled={u.user_id === me.user_id}
+                    >
+                      <SelectTrigger className="h-9 w-28 rounded-xl bg-surface2 border-slate-200 dark:border-slate-800 text-xs font-medium" data-testid={`status-select-${u.user_id}`}>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="active">Active</SelectItem>
+                        <SelectItem value="pending">Pending</SelectItem>
+                        <SelectItem value="inactive">Deactivated</SelectItem>
+                      </SelectContent>
+                    </Select>
+
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteClick(u)}
+                      className={`h-9 w-9 rounded-xl flex items-center justify-center transition-all cursor-pointer ${
+                        u.user_id === me?.user_id
+                          ? "text-slate-300 dark:text-slate-600 hover:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
+                          : "text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 border border-transparent hover:border-rose-200 dark:hover:border-rose-900/50"
+                      }`}
+                      title={u.user_id === me?.user_id ? "Tidak dapat menghapus akun sendiri" : `Hapus ${u.name} (perlu persetujuan Manajer Divisi)`}
+                      data-testid={`delete-user-${u.user_id}`}
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+        </div>
+      </Card>
+
+      {/* Dialog Konfirmasi Penghapusan Karyawan */}
+      <Dialog open={!!deleteTargetUser} onOpenChange={(open) => !open && !isDeleting && setDeleteTargetUser(null)}>
+        <DialogContent className="max-w-md p-6 bg-surface rounded-3xl border border-slate-200 dark:border-slate-800 shadow-2xl">
+          <DialogHeader className="pb-3 border-b">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-rose-100 text-rose-600 dark:bg-rose-950/60 dark:text-rose-400 shrink-0">
+                <Trash2 size={20} />
+              </div>
+              <div className="text-left">
+                <DialogTitle className="text-base font-bold text-ink">Hapus Karyawan</DialogTitle>
+                <DialogDescription className="text-xs text-sub">Memerlukan persetujuan Manajer Divisi</DialogDescription>
+              </div>
+            </div>
+          </DialogHeader>
+
+          {deleteTargetUser && (
+            <div className="space-y-4 py-2">
+              <div className="flex items-center gap-3 p-3 rounded-2xl bg-surface2/70 border border-slate-200/60 dark:border-slate-700/60">
+                <Avatar user={deleteTargetUser} size={40} showStatus={false} />
+                <div className="min-w-0 flex-1 text-left">
+                  <p className="font-bold text-sm text-ink truncate">{deleteTargetUser.name}</p>
+                  <p className="text-xs text-sub truncate">{deleteTargetUser.email}</p>
+                  <div className="mt-1 flex items-center gap-1.5 flex-wrap">
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-brand/10 text-brand">
+                      Divisi: {deleteTargetUser.department || "General"}
+                    </span>
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-surface text-sub border">
+                      {ROLE_NAMES[deleteTargetUser.role] || deleteTargetUser.role}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-amber-200/80 bg-amber-50/70 dark:border-amber-900/40 dark:bg-amber-950/30 p-3.5 text-xs text-amber-900 dark:text-amber-200 leading-relaxed text-left">
+                <p className="font-bold mb-1 flex items-center gap-1.5 text-amber-800 dark:text-amber-300">
+                  <span>⚠️</span> Persetujuan Manajer Divisi
+                </p>
+                <p className="text-[11.5px] opacity-90">
+                  Penghapusan akun <b>{deleteTargetUser.name}</b> akan diajukan ke <b>Manajer Divisi {deleteTargetUser.department || "General"}</b> melalui Asisten <b>"Circle"</b> berupa kartu persetujuan (approval card). Akun akan dihapus permanen setelah disetujui.
+                </p>
+              </div>
+            </div>
+          )}
+
+          <DialogFooter className="pt-3 border-t flex items-center justify-end gap-2">
+            <button
+              type="button"
+              disabled={isDeleting}
+              onClick={() => setDeleteTargetUser(null)}
+              className="h-10 px-4 rounded-xl border bg-surface hover:bg-surface2 text-xs font-semibold text-sub hover:text-ink transition-colors cursor-pointer"
+            >
+              Batal
+            </button>
+            <button
+              type="button"
+              disabled={isDeleting}
+              onClick={handleConfirmDelete}
+              className="h-10 px-4 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold shadow-xs flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+              data-testid="confirm-delete-user-btn"
+            >
+              <Trash2 size={14} />
+              {isDeleting ? "Memproses..." : "Ajukan Hapus ke Manajer Divisi"}
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+export function WeeklyReportCard() {
+  const { ws, users = [], reloadWs } = useApp();
+  const [busy, setBusy] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [selectedRoles, setSelectedRoles] = useState(() =>
+    Array.isArray(ws?.report_recipient_roles)
+      ? ws.report_recipient_roles
+      : ["super_admin", "workspace_admin", "department_manager", "project_manager"]
+  );
+  const [selectedUserIds, setSelectedUserIds] = useState(() =>
+    Array.isArray(ws?.report_recipient_ids) ? ws.report_recipient_ids : []
+  );
+  const [customEmails, setCustomEmails] = useState(() =>
+    Array.isArray(ws?.report_custom_emails) ? ws.report_custom_emails : []
+  );
+  const [newEmail, setNewEmail] = useState("");
+
+  useEffect(() => {
+    if (Array.isArray(ws?.report_recipient_roles)) setSelectedRoles(ws.report_recipient_roles);
+    if (Array.isArray(ws?.report_recipient_ids)) setSelectedUserIds(ws.report_recipient_ids);
+    if (Array.isArray(ws?.report_custom_emails)) setCustomEmails(ws.report_custom_emails);
+  }, [ws?.report_recipient_roles, ws?.report_recipient_ids, ws?.report_custom_emails]);
+
+  const humanUsers = (users || []).filter(
+    (u) => u && !u.is_bot && u.role !== "assistant" && u.user_id !== "user_circle_assistant" && u.status !== "inactive"
+  );
+
+  const toggleRole = (roleKey) => {
+    setSelectedRoles((prev) =>
+      prev.includes(roleKey) ? prev.filter((r) => r !== roleKey) : [...prev, roleKey]
+    );
+  };
+
+  const toggleUser = (uid) => {
+    setSelectedUserIds((prev) =>
+      prev.includes(uid) ? prev.filter((id) => id !== uid) : [...prev, uid]
+    );
+  };
+
+  const addCustomEmail = () => {
+    const clean = newEmail.trim().toLowerCase();
+    if (!clean || !clean.includes("@")) return toast.error("Masukkan alamat email yang valid");
+    if (customEmails.includes(clean)) return toast.error("Email sudah ada di daftar penerima");
+    setCustomEmails((prev) => [...prev, clean]);
+    setNewEmail("");
+  };
+
+  const removeCustomEmail = (em) => {
+    setCustomEmails((prev) => prev.filter((x) => x !== em));
+  };
+
+  const saveRecipients = async () => {
+    setSaving(true);
+    try {
+      await api.patch("/workspace", {
+        report_recipient_roles: selectedRoles,
+        report_recipient_ids: selectedUserIds,
+        report_custom_emails: customEmails,
+      });
+      await reloadWs();
+      toast.success("Daftar penerima laporan berhasil disimpan!");
+    } catch (e) {
+      toast.error(errMsg(e, "Gagal menyimpan penerima laporan"));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const test = async () => {
+    setBusy(true);
+    try {
+      const { data } = await api.post("/reports/weekly/test", {
+        recipient_roles: selectedRoles,
+        recipient_ids: selectedUserIds,
+        custom_emails: customEmails,
+      });
+      await reloadWs();
+      toast.success(`Laporan berhasil dikirim ke: ${data.sent_to}`);
+    } catch (e) {
+      toast.error(errMsg(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const activeRecipientUsers = humanUsers.filter(
+    (u) => selectedUserIds.includes(u.user_id) || selectedRoles.includes(u.role)
+  );
+
+  return (
+    <Card title="Laporan Progres Mingguan & Penerima Report" testid="weekly-report-card">
+      <p className="text-xs text-sub leading-relaxed">
+        Atur siapa saja yang dapat menerima laporan progres mingguan, ringkasan checkpoint, dan kendala task di seluruh board workspace.
+      </p>
+
+      {/* 1. Filter by Role */}
+      <div className="mt-4">
+        <p className="text-xs font-bold text-ink mb-2">Role Penerima Otomatis</p>
+        <div className="flex flex-wrap gap-2">
+          {Object.entries(ROLE_NAMES).map(([roleKey, roleLabel]) => {
+            const active = selectedRoles.includes(roleKey);
+            return (
+              <button
+                key={roleKey}
+                type="button"
+                onClick={() => toggleRole(roleKey)}
+                className={`rounded-xl border px-3 py-1.5 text-xs font-semibold transition-colors cursor-pointer ${
+                  active
+                    ? "border-brand bg-brand text-white shadow-2xs"
+                    : "bg-surface2 text-sub hover:text-ink"
+                }`}
+                data-testid={`report-role-${roleKey}`}
+              >
+                {roleLabel}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* 2. Specific Team Members */}
+      <div className="mt-4">
+        <div className="flex items-center justify-between mb-2">
+          <p className="text-xs font-bold text-ink">Pilih Anggota Tim Tertentu</p>
+          <div className="flex items-center gap-2 text-[11px]">
+            <button
+              type="button"
+              onClick={() => setSelectedUserIds(humanUsers.map((u) => u.user_id))}
+              className="font-semibold text-brand hover:underline cursor-pointer"
+            >
+              Pilih Semua
+            </button>
+            <span className="text-sub">·</span>
+            <button
+              type="button"
+              onClick={() => setSelectedUserIds([])}
+              className="font-semibold text-sub hover:text-ink cursor-pointer"
+            >
+              Reset Pilihan
+            </button>
+          </div>
+        </div>
+        <div className="max-h-48 overflow-y-auto divide-y rounded-2xl border bg-surface2/40 px-3 py-1">
+          {humanUsers.map((u) => {
+            const isRoleMatched = selectedRoles.includes(u.role);
+            const isChecked = selectedUserIds.includes(u.user_id) || isRoleMatched;
+            return (
+              <label
+                key={u.user_id}
+                className="flex items-center justify-between gap-3 py-2 text-xs cursor-pointer"
+                data-testid={`report-recipient-user-${u.user_id}`}
+              >
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <input
+                    type="checkbox"
+                    checked={isChecked}
+                    onChange={() => {
+                      if (isRoleMatched && !selectedUserIds.includes(u.user_id)) {
+                        toggleRole(u.role);
+                      } else {
+                        toggleUser(u.user_id);
+                      }
+                    }}
+                    className="h-4 w-4 rounded accent-brand"
+                  />
+                  <Avatar user={u} size={26} showStatus={false} />
+                  <div className="min-w-0">
+                    <p className="font-bold text-ink truncate">{u.name}</p>
+                    <p className="text-[11px] text-sub truncate">{u.email} · {u.department || "Workspace"}</p>
+                  </div>
+                </div>
+                <span className="rounded-lg bg-surface px-2 py-0.5 text-[10px] font-semibold text-sub border shrink-0">
+                  {ROLE_NAMES[u.role] || u.role}
+                </span>
+              </label>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* 3. Additional Custom Emails */}
+      <div className="mt-4">
+        <p className="text-xs font-bold text-ink mb-1.5">Email Penerima Tambahan</p>
+        <div className="flex items-center gap-2">
+          <input
+            type="email"
+            value={newEmail}
+            onChange={(e) => setNewEmail(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addCustomEmail())}
+            placeholder="Tambahkan email eksternal / manajemen..."
+            className={`${inp} flex-1 text-xs`}
+            data-testid="report-custom-email-input"
+          />
+          <button
+            type="button"
+            onClick={addCustomEmail}
+            className="btn-ghost h-10 border px-3.5 text-xs font-semibold shrink-0 cursor-pointer"
+            data-testid="report-add-email-btn"
+          >
+            + Tambah Email
+          </button>
+        </div>
+        {customEmails.length > 0 && (
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {customEmails.map((em) => (
+              <span
+                key={em}
+                className="inline-flex items-center gap-1.5 rounded-full border bg-surface2 px-3 py-1 text-xs font-medium text-ink"
+              >
+                {em}
+                <button
+                  type="button"
+                  onClick={() => removeCustomEmail(em)}
+                  className="text-sub hover:text-rose-500 font-bold cursor-pointer"
+                >
+                  ×
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t pt-3">
+        <span className="text-xs text-sub">
+          Total penerima aktif: <b className="text-ink">{activeRecipientUsers.length + customEmails.length} orang</b>
+        </span>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={saveRecipients}
+            disabled={saving}
+            className="btn-accent h-10 px-4 text-xs font-bold disabled:opacity-50 cursor-pointer"
+            data-testid="save-report-recipients-btn"
+          >
+            {saving ? "Menyimpan..." : "Simpan Penerima Report"}
+          </button>
+          <button
+            type="button"
+            onClick={test}
+            disabled={busy}
+            className="btn-ghost h-10 border px-4 text-xs font-semibold disabled:opacity-50 cursor-pointer"
+            data-testid="weekly-report-test-btn"
+          >
+            {busy ? "Mengirim…" : "Kirim Report Sekarang"}
+          </button>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+export function WorkspaceBranding() {
+  const { ws, reloadWs } = useApp();
+  const formatOrgLevels = (val) => Array.isArray(val) ? val.join(", ") : String(val || "");
+  const [f, setF] = useState({ brand_name: ws?.brand_name || ws?.name || "", name: ws?.name || "", tagline: ws?.tagline || "", description: ws?.description || "", org_levels: formatOrgLevels(ws?.org_levels) });
+
+  useEffect(() => {
+    setF({
+      brand_name: ws?.brand_name || ws?.name || "",
+      name: ws?.name || "",
+      tagline: ws?.tagline || "",
+      description: ws?.description || "",
+      org_levels: formatOrgLevels(ws?.org_levels)
+    });
+  }, [ws]);
+  const logo = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      const up = await uploadFile(file);
+      await api.patch("/workspace", { logo_file_id: up.id });
+      toast.success("Foto profil workspace berhasil diperbarui!");
+      reloadWs();
+    } catch (er) {
+      toast.error(errMsg(er, "Gagal mengupload logo workspace"));
+    }
+  };
+  const favicon = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      const up = await uploadFile(file);
+      await api.patch("/workspace", { favicon_file_id: up.id });
+      toast.success("Icon website (Favicon) berhasil diperbarui!");
+      reloadWs();
+    } catch (er) {
+      toast.error(errMsg(er, "Gagal mengupload favicon website"));
+    }
+  };
+  const loginImg = async (e) => {
+    const fl = e.target.files[0];
+    if (!fl) return;
+    if (!fl.type.startsWith("image/")) return toast.error("Pilih file gambar");
+    try {
+      const up = await uploadFile(fl);
+      await api.patch("/workspace", { login_image_file_id: up.id });
+      toast.success("Gambar halaman login berhasil diperbarui!");
+      reloadWs();
+    } catch (er) {
+      toast.error(errMsg(er, "Gagal mengupload gambar login"));
+    }
+  };
+  return (
+    <Card title="Workspace Identity & Branding" testid="workspace-branding">
+      <div className="mb-5 flex flex-wrap items-center gap-4 rounded-2xl border bg-surface2/50 p-4">
+        <Logo ws={ws} size={56} />
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-bold">Foto Profil / Logo Workspace</p>
+          <p className="text-xs text-sub">Tampil di header sidebar, login, dan seluruh workspace CIRCLE.</p>
+          <div className="mt-2 flex items-center gap-3">
+            <label className="cursor-pointer rounded-xl bg-brand px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:opacity-90 transition-opacity">
+              Ubah Foto Profil Workspace
+              <input type="file" accept="image/*" hidden onChange={logo} data-testid="logo-upload-input" />
+            </label>
+            {ws.logo_file_id && (
+              <button onClick={() => run(() => api.patch("/workspace", { logo_file_id: null }), "Logo dihapus").then(reloadWs)} className="text-xs text-rose-500 hover:underline">
+                Hapus Logo Kustom
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Favicon (Icon Tab Website) Setting */}
+      <div className="mb-5 flex flex-wrap items-center gap-4 rounded-2xl border bg-surface2/50 p-4" data-testid="favicon-setting">
+        <div className="flex h-14 w-14 items-center justify-center rounded-2xl border bg-surface p-2 shadow-xs">
+          {ws?.favicon_file_id ? (
+            <img
+              src={`/api/files/${ws.favicon_file_id}`}
+              alt="Favicon preview"
+              className="h-10 w-10 object-contain rounded-lg"
+              data-testid="favicon-preview"
+            />
+          ) : (
+            <img
+              src={ws?.logo_file_id && ws.logo_file_id !== "default_workspace_logo" ? `/api/files/${ws.logo_file_id}` : "/assets/aistudio/657343220_18309991366279811_6828424809008890253_n_c00cf220.png"}
+              alt="Default icon"
+              className="h-10 w-10 object-contain rounded-lg"
+              data-testid="favicon-preview-default"
+            />
+          )}
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <p className="text-sm font-bold">Icon Website</p>
+            <span className="rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300 px-2 py-0.5 text-[10px] font-bold">
+              Browser Tab & PWA
+            </span>
+          </div>
+          <p className="text-xs text-sub mt-0.5">
+            Icon kecil yang muncul di tab browser, bookmark bar, dan shortcut home screen aplikasi. Format disarankan: PNG, SVG, atau ICO.
+          </p>
+          <div className="mt-2 flex items-center gap-3">
+            <label className="cursor-pointer rounded-xl bg-brand px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:opacity-90 transition-opacity">
+              Ubah Icon Website
+              <input type="file" accept="image/*,.ico,.svg" hidden onChange={favicon} data-testid="favicon-upload-input" />
+            </label>
+            {ws.favicon_file_id && (
+              <button
+                type="button"
+                onClick={() => run(() => api.patch("/workspace", { favicon_file_id: null }), "Favicon kustom dihapus, memakai logo default").then(reloadWs)}
+                className="text-xs text-sub hover:underline"
+                data-testid="favicon-reset-btn"
+              >
+                Gunakan Logo Workspace
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+      <div className="mb-5 flex flex-wrap items-center gap-4 rounded-2xl border bg-surface2/50 p-4" data-testid="login-image-setting">
+        <img
+          src={ws.login_image_file_id && ws.login_image_file_id !== "default_login_bg" ? `/api/public/login-image/${ws.login_image_file_id}` : "/assets/aistudio/SIGN_DEPAN_2_86dd649d.jpg"}
+          alt="Gambar login"
+          onError={(e) => { e.currentTarget.src = "/assets/aistudio/SIGN_DEPAN_2_86dd649d.jpg"; }}
+          className="h-16 w-28 rounded-xl object-cover shadow-sm border"
+          data-testid="login-image-preview"
+        />
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-bold">Gambar Halaman Login</p>
+          <p className="text-xs text-sub">Background ilustrasi di sisi kiri halaman masuk.</p>
+          <div className="mt-2 flex items-center gap-3">
+            <label className="cursor-pointer rounded-xl bg-brand px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:opacity-90 transition-opacity">
+              Ubah Gambar Login
+              <input type="file" accept="image/*" hidden onChange={loginImg} data-testid="login-image-upload-input" />
+            </label>
+            {ws.login_image_file_id && (
+              <button onClick={() => run(() => api.patch("/workspace", { login_image_file_id: null }), "Kembali ke gambar default").then(reloadWs)} className="text-xs text-sub hover:underline" data-testid="login-image-reset">
+                Pakai Default
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        {[["brand_name", "App name"], ["name", "Workspace name"], ["tagline", "Tagline"], ["description", "Description"], ["org_levels", "Organization levels"]].map(([k, l]) => <label key={k} className="text-xs font-semibold text-sub">{l}<input value={f[k] || ""} onChange={(e) => setF({ ...f, [k]: e.target.value })} className={`${inp} mt-1 w-full`} data-testid={`ws-${k}-input`} /></label>)}
+      </div>
+      <button
+        type="button"
+        onClick={() => run(() => api.patch("/workspace", {
+          ...f,
+          name: f.name || f.brand_name,
+          brand_name: f.brand_name || f.name,
+          org_levels: String(f.org_levels || "").split(",").map((x) => x.trim()).filter(Boolean)
+        }), "Pengaturan Workspace berhasil disimpan!").then(reloadWs)}
+        className="btn-accent mt-4 h-10 px-5 text-sm font-semibold"
+        data-testid="ws-save-btn"
+      >
+        Save
+      </button>
+    </Card>
+  );
+}
+
+export function DivisionsAdmin() {
+  const { ws, reloadWs } = useApp();
+  const [list, setList] = useState(() => DIVISIONS_CACHE || ws?.divisions || []);
+  const [n, setN] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    api.get("/workspace").then((r) => {
+      const divs = Array.isArray(r.data?.divisions) ? r.data.divisions : [];
+      DIVISIONS_CACHE = divs;
+      setList(divs);
+      try { localStorage.setItem("circle_admin_divisions", JSON.stringify(divs)); } catch {}
+    }).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (Array.isArray(ws?.divisions)) {
+      DIVISIONS_CACHE = ws.divisions;
+      setList(ws.divisions);
+      try { localStorage.setItem("circle_admin_divisions", JSON.stringify(ws.divisions)); } catch {}
+    }
+  }, [ws?.divisions]);
+
+  const save = async (nextList, msg = "Daftar divisi, struktur organisasi & grup berhasil diselaraskan!") => {
+    const cleaned = Array.from(
+      new Set(nextList.map((d) => String(d || "").trim()).filter(Boolean))
+    );
+    // 0ms optimistic update
+    DIVISIONS_CACHE = cleaned;
+    setList(cleaned);
+    try { localStorage.setItem("circle_admin_divisions", JSON.stringify(cleaned)); } catch {}
+    setSaving(true);
+    try {
+      await api.patch("/workspace", { divisions: cleaned });
+      const syncRes = await api.post("/org/sync-divisions", { divisions: cleaned }).catch(() => null);
+      if (syncRes?.data) {
+        if (Array.isArray(syncRes.data.units)) {
+          try { localStorage.setItem("circle_org_units_cache", JSON.stringify(syncRes.data.units)); } catch {}
+        }
+        if (Array.isArray(syncRes.data.groups)) {
+          try { localStorage.setItem("circle_groups_cache", JSON.stringify(syncRes.data.groups)); } catch {}
+        }
+      }
+      await reloadWs();
+      toast.success(msg);
+    } catch (e) {
+      toast.error(errMsg(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const add = () => {
+    const clean = n.trim();
+    if (!clean) return;
+    if (list.some((x) => x.toLowerCase() === clean.toLowerCase())) {
+      return toast.error("Divisi tersebut sudah ada");
+    }
+    const next = [...list, clean];
+    setN("");
+    save(next, `Divisi "${clean}" ditambahkan & diselaraskan ke Struktur Organisasi dan Grup!`);
+  };
+
+  const move = (idx, dir) => {
+    const target = idx + dir;
+    if (target < 0 || target >= list.length) return;
+    const next = [...list];
+    [next[idx], next[target]] = [next[target], next[idx]];
+    setList(next);
+  };
+
+  const renameItem = (idx, val) => {
+    const next = [...list];
+    next[idx] = val;
+    setList(next);
+  };
+
+  return (
+    <Card title="Daftar Divisi & Penyelarasan Struktur Organisasi" testid="divisions-admin">
+      <p className="mb-3 text-xs text-sub">
+        Kelola daftar divisi resmi perusahaan. Setiap penambahan, penghapusan, perubahan nama, atau urutan divisi di sini otomatis tersimpan dan tersinkronisasi dengan halaman <b>Organization Structure</b>, <b>Groups</b>, <b>Employee</b>, dan <b>Directory</b>.
+      </p>
+      <div className="flex items-center gap-2">
+        <input
+          value={n}
+          onChange={(e) => setN(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && add()}
+          placeholder="Tambah nama divisi baru..."
+          className={`${inp} flex-1 min-w-0`}
+          data-testid="division-name-input"
+        />
+        <button
+          type="button"
+          onClick={add}
+          disabled={saving}
+          className="btn-accent h-10 px-5 text-sm font-semibold whitespace-nowrap shrink-0 inline-flex items-center justify-center gap-1.5 cursor-pointer"
+          data-testid="division-add-btn"
+        >
+          <Plus size={14} className="shrink-0" />
+          <span>Tambah</span>
+        </button>
+      </div>
+
+      <div className="mt-3 space-y-2 max-h-80 overflow-y-auto pr-1">
+        {list.map((d, i) => (
+          <div
+            key={`${d}-${i}`}
+            className="flex items-center gap-2 rounded-xl border bg-surface2/60 px-3 py-1.5"
+            data-testid={`division-item-${String(d).replace(/\s/g, "-")}`}
+          >
+            <span className="text-xs font-bold text-sub w-5">{i + 1}.</span>
+            <input
+              value={d}
+              onChange={(e) => renameItem(i, e.target.value)}
+              className="h-8 flex-1 rounded-lg border bg-surface px-2.5 text-xs font-semibold text-ink outline-none focus:border-brand"
+            />
+            <button
+              type="button"
+              disabled={i === 0}
+              onClick={() => move(i, -1)}
+              className="text-sub hover:text-ink disabled:opacity-30 p-1 cursor-pointer"
+              title="Geser ke atas"
+            >
+              <ArrowUp size={14} />
+            </button>
+            <button
+              type="button"
+              disabled={i === list.length - 1}
+              onClick={() => move(i, 1)}
+              className="text-sub hover:text-ink disabled:opacity-30 p-1 cursor-pointer"
+              title="Geser ke bawah"
+            >
+              <ArrowDown size={14} />
+            </button>
+            <button
+              type="button"
+              onClick={() => save(list.filter((_, idx) => idx !== i), `Divisi "${d}" berhasil dihapus & diselaraskan`)}
+              className="text-sub hover:text-rose-500 p-1 cursor-pointer"
+              aria-label={`Hapus ${d}`}
+              data-testid={`division-remove-${String(d).replace(/\s/g, "-")}`}
+            >
+              <Trash2 size={14} />
+            </button>
+          </div>
+        ))}
+        {!list.length && <p className="text-sm text-sub py-2">Belum ada divisi.</p>}
+      </div>
+
+      <div className="mt-4 flex justify-end border-t pt-3">
+        <button
+          type="button"
+          disabled={saving}
+          onClick={() => save(list)}
+          className="btn-accent h-10 px-5 text-sm font-semibold whitespace-nowrap disabled:opacity-50 cursor-pointer"
+          data-testid="divisions-save-btn"
+        >
+          {saving ? "Menyimpan..." : "Simpan & Selaraskan Divisi"}
+        </button>
+      </div>
+    </Card>
+  );
+}
+
+function ColorSwatch({ value, onSave, testid }) {
+  const [c, setC] = useState(value);
+  const timer = useRef(null);
+  useEffect(() => { setC(value); }, [value]);
+  const change = (v) => { setC(v); clearTimeout(timer.current); timer.current = setTimeout(() => v.toLowerCase() !== value.toLowerCase() && onSave(v), 200); };
+  return <input type="color" value={c} onChange={(e) => change(e.target.value)} className="h-8 w-8" aria-label="Warna item" data-testid={testid} />;
+}
+
+export function ItemTypesAdmin() {
+  const { ws, reloadWs } = useApp();
+  const [n, setN] = useState("");
+  const [color, setColor] = useState("#2563EB");
+  const rawList = ws.item_types || [];
+  const combinedMap = new Map();
+  DEFAULT_ITEM_TYPES.forEach((i) => combinedMap.set(i.name.toLowerCase(), i));
+  rawList.forEach((i) => combinedMap.set(i.name.toLowerCase(), i));
+  const list = Array.from(combinedMap.values());
+
+  const save = (l, msg) => run(() => api.patch("/workspace", { item_types: l }), msg).then(reloadWs);
+  const add = () => n.trim() && run(() => api.post("/item-types", { name: n.trim(), color }), "Item ditambahkan").then(() => { setN(""); reloadWs(); });
+  return (
+    <Card title="Jenis Item Task" testid="item-types-admin">
+      <p className="mb-3 text-xs text-sub">Daftar item resmi dan kustom untuk task. Anda bisa menambahkan jenis item baru, mengubah warna, atau menghapusnya.</p>
+      <div className="flex items-center gap-2">
+        <input value={n} onChange={(e) => setN(e.target.value)} onKeyDown={(e) => e.key === "Enter" && add()} placeholder="Nama item baru..." className={`${inp} flex-1 min-w-0`} data-testid="item-type-name-input" />
+        <input type="color" value={color} onChange={(e) => setColor(e.target.value)} className="h-10 w-10 shrink-0 cursor-pointer rounded-lg border p-1" title="Pilih warna item" />
+        <button type="button" onClick={add} className="btn-accent h-10 px-5 text-sm font-semibold whitespace-nowrap shrink-0 inline-flex items-center justify-center gap-1.5 cursor-pointer" data-testid="item-type-add-btn"><Plus size={14} className="shrink-0" /><span>Tambah</span></button>
+      </div>
+      <div className="mt-3 divide-y max-h-96 overflow-y-auto pr-1">{list.map((it, i) => (
+        <div key={it.name} className="flex items-center gap-3 py-2" data-testid={`item-type-row-${it.name.replace(/\s/g, "-")}`}>
+          <ColorSwatch value={it.color} onSave={(c) => save(list.map((x, j) => (j === i ? { ...x, color: c } : x)), "Warna disimpan")} testid={`item-type-color-${it.name.replace(/\s/g, "-")}`} />
+          <span className="flex-1"><ItemChip name={it.name} /></span>
+          <button onClick={() => save(list.filter((_, j) => j !== i), "Item dihapus")} className="text-sub hover:text-rose-500 cursor-pointer" aria-label={`Hapus ${it.name}`} data-testid={`item-type-remove-${it.name.replace(/\s/g, "-")}`}><Trash2 size={14} /></button>
+        </div>))}</div>
+    </Card>
+  );
+}
+
+export function LabelsAdmin() {
+  const { labels, reloadLabels, isManager } = useApp();
+  const [n, setN] = useState({ name: "", color: "#2F7DE1", description: "" });
+  return (
+    <Card title="IP / Brand labels" testid="labels-admin">
+      <div className="mb-4 flex flex-wrap gap-2"><input value={n.name} onChange={(e) => setN({ ...n, name: e.target.value })} placeholder="Label name" className={`${inp} flex-1`} data-testid="label-name-input" /><input type="color" value={n.color} onChange={(e) => setN({ ...n, color: e.target.value })} className="h-10 w-12" aria-label="Color" /><input value={n.description} onChange={(e) => setN({ ...n, description: e.target.value })} placeholder="Description" className={`${inp} flex-1`} />
+        <button onClick={() => run(() => api.post("/labels", n), "Label created").then((ok) => { if (ok) { setN({ name: "", color: "#2F7DE1", description: "" }); reloadLabels(); } })} className="btn-accent h-10 px-4 text-sm font-semibold" data-testid="label-create-btn"><Plus size={14} /></button></div>
+      <div className="divide-y">{labels.map((l) => (
+        <div key={l.id} className="flex flex-wrap items-center gap-2 py-2" data-testid={`label-row-${l.id}`}>
+          <input type="color" value={l.color} disabled={!isManager} onChange={(e) => run(() => api.patch(`/labels/${l.id}`, { color: e.target.value })).then(reloadLabels)} className="h-8 w-8" aria-label="Label color" data-testid={`label-color-${l.id}`} />
+          <input defaultValue={l.name} disabled={!isManager} onBlur={(e) => e.target.value !== l.name && run(() => api.patch(`/labels/${l.id}`, { name: e.target.value }), "Renamed").then(reloadLabels)} className="h-9 w-40 rounded-lg border bg-surface2 px-2 text-sm" data-testid={`label-name-${l.id}`} />
+          <LabelChip label={l} small /><span className="flex-1 truncate text-xs text-sub">{l.description}</span>
+          {isManager && <><button onClick={() => run(() => api.patch(`/labels/${l.id}`, { archived: !l.archived }), l.archived ? "Restored" : "Archived").then(reloadLabels)} className="text-xs font-semibold text-sub" data-testid={`label-archive-${l.id}`}>{l.archived ? "Restore" : "Archive"}</button>
+            <button onClick={() => run(() => api.delete(`/labels/${l.id}`), "Deleted").then(reloadLabels)} className="text-rose-500" aria-label="Delete label" data-testid={`label-delete-${l.id}`}><Trash2 size={14} /></button></>}
+        </div>))}</div>
+    </Card>
+  );
+}
+
+export function StatusesAdmin() {
+  const { ws, reloadWs } = useApp();
+  const normalizeStatuses = (arr) => (arr || []).map((s) => typeof s === "string" ? { key: s, name: s.replace(/_/g, " "), color: "#F0F4FA", is_done: s === "done" } : { key: s.key || `st_${Math.random()}`, name: s.name || "Status", color: s.color || "#F0F4FA", is_done: !!s.is_done });
+  const [list, setList] = useState(() => normalizeStatuses(ws?.task_statuses));
+  useEffect(() => {
+    if (ws?.task_statuses) setList(normalizeStatuses(ws.task_statuses));
+  }, [ws?.task_statuses]);
+  const mv = (i, d) => { const l = [...list]; [l[i], l[i + d]] = [l[i + d], l[i]]; setList(l); };
+  return (
+    <Card title="Task statuses" testid="statuses-admin">
+      <div className="space-y-2">{list.map((s, i) => (
+        <div key={s.key || i} className="flex flex-wrap items-center gap-2"><input type="color" value={s.color} onChange={(e) => setList(list.map((x, j) => (j === i ? { ...x, color: e.target.value } : x)))} className="h-9 w-9" aria-label="Status color" />
+          <input value={s.name} onChange={(e) => setList(list.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))} className={`${inp} flex-1`} data-testid={`status-name-${s.key || i}`} />
+          <label className="flex items-center gap-1 text-xs"><input type="checkbox" checked={s.is_done} onChange={(e) => setList(list.map((x, j) => (j === i ? { ...x, is_done: e.target.checked } : x)))} className="accent-[var(--c-accent)]" />Done</label>
+          <button type="button" disabled={!i} onClick={() => mv(i, -1)} className="text-sub disabled:opacity-30" aria-label="Up"><ArrowUp size={14} /></button><button type="button" disabled={i === list.length - 1} onClick={() => mv(i, 1)} className="text-sub disabled:opacity-30" aria-label="Down"><ArrowDown size={14} /></button>
+          <button type="button" onClick={() => setList(list.filter((_, j) => j !== i))} className="text-rose-500" aria-label="Remove status"><Trash2 size={14} /></button></div>))}</div>
+      <div className="mt-3 flex gap-2"><button type="button" onClick={() => setList([...list, { key: `st_${Date.now().toString(36)}`, name: "New status", color: "#EEE6FF", is_done: false }])} className="btn-ghost h-10 border px-4 text-sm font-semibold" data-testid="add-status-btn">Add status</button>
+        <button type="button" onClick={() => run(() => api.put("/settings/task-config", { task_statuses: list }), "Status tugas berhasil disimpan!").then(reloadWs)} className="btn-accent h-10 px-4 text-sm font-semibold" data-testid="save-statuses-btn">Save</button></div>
+    </Card>
+  );
+}
+
+const TYPES = ["short_text", "long_text", "email", "phone", "date", "dropdown", "multi_select", "url", "boolean", "location"];
+export function ProfileFieldsAdmin() {
+  const { ws, reloadWs } = useApp();
+  const [fields, setFields] = useState(ws?.profile_fields || []);
+  const [vis, setVis] = useState(ws?.field_visibility || {});
+  useEffect(() => {
+    setFields(ws?.profile_fields || []);
+    setVis(ws?.field_visibility || {});
+  }, [ws?.profile_fields, ws?.field_visibility]);
+  const upd = (i, p) => setFields(fields.map((f, j) => (j === i ? { ...f, ...p } : f)));
+  const mv = (i, d) => { const l = [...fields]; [l[i], l[i + d]] = [l[i + d], l[i]]; setFields(l); };
+  const V = ({ value, onChange, testid }) => <select value={value} onChange={(e) => onChange(e.target.value)} className="h-9 rounded-lg border bg-surface2 px-2 text-xs" data-testid={testid}><option value="everyone">Everyone</option><option value="managers">Managers</option><option value="admins">Admins only</option></select>;
+  return (
+    <Card title="Employee profile fields" testid="profile-fields-admin">
+      <p className="mb-2 text-xs font-semibold text-sub">Standard field visibility</p>
+      <div className="mb-5 grid gap-2 sm:grid-cols-2">{["email", "phone", "employee_id", "employment_status", "join_date"].map((k) => <div key={k} className="flex items-center justify-between rounded-xl bg-surface2 px-3 py-2 text-sm">{k.replace("_", " ")}<V value={vis[k] || "everyone"} onChange={(v) => setVis({ ...vis, [k]: v })} testid={`vis-${k}`} /></div>)}</div>
+      <p className="mb-2 text-xs font-semibold text-sub">Custom fields</p>
+      <div className="space-y-2">{fields.map((f, i) => (
+        <div key={f.key || i} className="flex flex-wrap items-center gap-2 rounded-xl border p-2">
+          <input value={f.name} onChange={(e) => upd(i, { name: e.target.value })} className="h-9 flex-1 rounded-lg border bg-surface2 px-2 text-sm" data-testid={`cf-name-${i}`} />
+          <select value={f.type} onChange={(e) => upd(i, { type: e.target.value })} className="h-9 rounded-lg border bg-surface2 px-2 text-xs">{TYPES.map((t) => <option key={t} value={t}>{t.replace("_", " ")}</option>)}</select>
+          {["dropdown", "multi_select"].includes(f.type) && <input defaultValue={(f.options || []).join(", ")} onBlur={(e) => upd(i, { options: e.target.value.split(",").map((x) => x.trim()).filter(Boolean) })} placeholder="Options, comma separated" className="h-9 rounded-lg border bg-surface2 px-2 text-xs" />}
+          <V value={f.visibility} onChange={(v) => upd(i, { visibility: v })} />
+          <button type="button" disabled={!i} onClick={() => mv(i, -1)} className="text-sub disabled:opacity-30" aria-label="Up"><ArrowUp size={14} /></button>
+          <button type="button" onClick={() => setFields(fields.filter((_, j) => j !== i))} className="text-rose-500" aria-label="Remove field"><Trash2 size={14} /></button>
+        </div>))}</div>
+      <div className="mt-3 flex gap-2"><button type="button" onClick={() => setFields([...fields, { key: `cf_${Date.now()}`, name: "New field", type: "short_text", visibility: "everyone", options: [] }])} className="btn-ghost h-10 border px-4 text-sm font-semibold" data-testid="add-profile-field-btn">Add field</button>
+        <button type="button" onClick={() => run(() => api.put("/settings/profile-fields", { fields, field_visibility: vis }), "Field profil berhasil disimpan!").then(reloadWs)} className="btn-accent h-10 px-4 text-sm font-semibold" data-testid="save-profile-fields-btn">Save</button></div>
+    </Card>
+  );
+}
+
+export function StickersAdmin() {
+  const [name, setName] = useState("");
+  const [data, setData] = useState(STICKERS_CACHE);
+  const load = () => api.get("/stickers").then((r) => { 
+    setData(r.data); 
+    STICKERS_CACHE = r.data;
+    localStorage.setItem("circle_admin_stickers_data", JSON.stringify(r.data));
+  });
+  useEffect(() => { load(); }, []);
+
+  const handleCreatePack = async () => {
+    if (!name.trim()) return toast.error("Ketik nama paket stiker");
+    try {
+      await api.post("/sticker-packs", { name: name.trim(), category: name.trim() });
+      toast.success(`Paket stiker "${name.trim()}" berhasil dibuat`);
+      setName("");
+      load();
+    } catch (e) {
+      toast.error(errMsg(e));
+    }
+  };
+
+  const handleDeleteSticker = async (stkId) => {
+    try {
+      await api.delete(`/stickers/${stkId}`);
+      toast.success("Stiker berhasil dihapus");
+      load();
+    } catch (e) {
+      toast.error(errMsg(e));
+    }
+  };
+
+  return (
+    <Card title="Paket & Perpustakaan Stiker Workspace" testid="stickers-admin">
+      <div className="space-y-4">
+        <p className="text-xs text-sub leading-relaxed">
+          Kelola paket stiker dan perpustakaan stiker workspace CIRCLE. Anggota tim juga dapat membuat stiker custom sendiri secara langsung dari sticker picker di obrolan chat.
+        </p>
+
+        <div className="flex gap-2">
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Nama paket stiker baru (mis. Marketing Memes, Squad Reactions)"
+            className={`${inp} flex-1 text-xs`}
+            data-testid="pack-name-input"
+          />
+          <button
+            type="button"
+            onClick={handleCreatePack}
+            className="btn-accent h-10 px-4 text-xs font-bold shrink-0"
+            data-testid="pack-create-btn"
+          >
+            Buat Paket
+          </button>
+        </div>
+
+        <div>
+          <h4 className="text-xs font-bold text-sub mb-2">Paket Stiker Aktif ({data?.packs?.length || 0}):</h4>
+          <ul className="grid gap-2 sm:grid-cols-2">
+            {(data?.packs || []).map((p) => {
+              const count = (data?.stickers || []).filter((s) => s.pack_id === p.id || s.category === p.category).length;
+              return (
+                <li key={p.id} className="rounded-xl border bg-surface2 px-3 py-2 text-xs flex items-center justify-between">
+                  <div>
+                    <span className="font-bold text-ink">{p.name}</span>
+                    <span className="ml-1.5 text-[11px] text-sub">({count} stiker)</span>
+                  </div>
+                  <span className="text-[10px] font-semibold text-sub rounded-full bg-surface px-2 py-0.5 border">
+                    {p.workspace_id === "global" ? "Bawaan Sistem" : "Paket Custom"}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+
+        {/* Custom Stickers Section */}
+        <div>
+          <h4 className="text-xs font-bold text-sub mb-2">Total Stiker Tersedia ({(data?.stickers || []).length}):</h4>
+          <div className="flex flex-wrap gap-2 max-h-60 overflow-y-auto p-2 rounded-xl border bg-surface2/30">
+            {(data?.stickers || []).map((s) => (
+              <div key={s.id} className="relative group flex items-center justify-center p-1.5 rounded-xl border bg-surface shadow-2xs">
+                <span className="text-2xl">{s.emoji || "✨"}</span>
+                <span className="text-[9px] font-extrabold max-w-[70px] truncate ml-1 text-ink">{s.name}</span>
+                {s.category === "Custom" && (
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteSticker(s.id)}
+                    className="ml-1 text-sub hover:text-rose-500 text-xs font-bold"
+                    title="Hapus stiker"
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+export function AssistantBranding() {
+  const { ws, reloadWs, isAdmin } = useApp();
+  const [name, setName] = useState(ws.assistant_name || "Circle");
+  const [avatar, setAvatar] = useState(ws.assistant_avatar || "");
+  const [uploading, setUploading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const fileInputRef = useRef(null);
+
+  useEffect(() => {
+    setName(ws.assistant_name || "Circle");
+    setAvatar(ws.assistant_avatar || "");
+  }, [ws]);
+
+  if (!isAdmin) return null;
+
+  const handleUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    try {
+      const res = await uploadFile(file);
+      const fileId = res.id || res.file_id || res.data?.id;
+      if (!fileId) throw new Error("ID file tidak ditemukan.");
+      const uploadedUrl = fileUrl(fileId);
+      setAvatar(uploadedUrl);
+      await api.patch("/workspace", { assistant_avatar: uploadedUrl });
+      toast.success("Foto profil chatbot berhasil diperbarui & disimpan!");
+      reloadWs();
+    } catch (e) {
+      toast.error(errMsg(e, "Gagal mengunggah foto"));
+    } finally {
+      setUploading(false);
+      e.target.value = "";
+    }
+  };
+
+  const handleReset = async () => {
+    setAvatar("");
+    try {
+      await api.patch("/workspace", { assistant_avatar: "" });
+      toast.success("Foto profil dikembalikan ke default");
+      reloadWs();
+    } catch (e) {
+      toast.error(errMsg(e, "Gagal mereset foto profil"));
+    }
+  };
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      await api.patch("/workspace", { assistant_name: name, assistant_avatar: avatar });
+      toast.success("Pengaturan Circle Assistant berhasil disimpan!");
+      reloadWs();
+    } catch (e) {
+      toast.error(errMsg(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const defaultAvatar = "https://api.dicebear.com/7.x/bottts/svg?seed=CircleWorkspace&backgroundColor=FF5364";
+  const displayAvatar = avatar || defaultAvatar;
+
+  return (
+    <Card title="Pengaturan Circle Assistant" testid="assistant-branding-card">
+      {/* Bot Avatar Section - Matches Workspace Identity & Branding card style */}
+      <div className="mb-5 flex flex-wrap items-center gap-4 rounded-2xl border bg-surface2/50 p-4">
+        <img
+          src={displayAvatar}
+          alt={name}
+          className="h-14 w-14 rounded-2xl object-cover shadow-sm border bg-surface"
+          onError={(e) => { e.currentTarget.src = defaultAvatar; }}
+        />
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-bold">Foto Profil / Avatar Assistant</p>
+          <p className="text-xs text-sub">Foto profil asisten AI yang muncul pada obrolan pesan, notifikasi, dan tugas.</p>
+          <div className="mt-2 flex items-center gap-3">
+            <input type="file" ref={fileInputRef} onChange={handleUpload} accept="image/*" className="hidden" />
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploading}
+              className="cursor-pointer rounded-xl bg-brand px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:opacity-90 transition-opacity disabled:opacity-50"
+              data-testid="upload-bot-avatar-btn"
+            >
+              {uploading ? "Mengunggah..." : "Ubah Foto Profil Bot"}
+            </button>
+            {avatar && (
+              <button
+                type="button"
+                onClick={handleReset}
+                className="text-xs text-sub hover:underline"
+                data-testid="reset-bot-avatar-btn"
+              >
+                Pakai Default
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Bot Name & Save Settings */}
+      <div className="space-y-4">
+        <div>
+          <label className="mb-1 block text-xs font-semibold text-sub">Nama Circle Assistant</label>
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Mis. Circle, Assistant, Soni"
+            className="h-10 w-full rounded-xl border bg-surface2 px-3 text-sm outline-none font-medium"
+            data-testid="assistant-name-input"
+          />
+        </div>
+        <button
+          type="button"
+          onClick={save}
+          disabled={saving || uploading}
+          className="btn-accent h-10 px-5 rounded-xl text-xs font-bold disabled:opacity-50"
+          data-testid="assistant-save-btn"
+        >
+          {saving ? "Menyimpan..." : "Simpan Perubahan Assistant"}
+        </button>
+      </div>
+    </Card>
+  );
+}

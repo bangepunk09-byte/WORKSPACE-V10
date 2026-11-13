@@ -1,0 +1,8 @@
+{
+  "name": "CIRCLE Workspace ASLI RI V10",
+  "description": "Enterprise collaboration portal with Google Auth, Calendar, and Drive integration",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

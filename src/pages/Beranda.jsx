@@ -1,0 +1,1263 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { Newspaper, MessageCircle, SmilePlus, ImagePlus, X, Trash2, ArrowLeft, BarChart3, TrendingUp, Hash, Pencil, Check, ChevronDown, ChevronUp, Loader2 } from "lucide-react";
+import { toast } from "sonner";
+import { useApp } from "../context/AppContext";
+import { api, errMsg, fileUrl, uploadFile } from "../lib/api";
+import { Avatar, PageHeader, rel, ImageLightbox } from "../components/common";
+import PollCard, { seedPollCache } from "./chat/PollCard";
+import CreatePollDialog from "./chat/CreatePollDialog";
+
+const EMOJIS = ["👍", "❤️", "😂", "🎉", "😮", "🙏"];
+const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+function RichText({ text, mentionIds }) {
+  const { userMap } = useApp();
+  const names = (mentionIds || []).map((id) => userMap[id]?.name).filter(Boolean);
+  const tag = "(?<![\\p{L}\\p{N}_#])#[\\p{L}\\p{N}_]{1,40}";
+  const rx = new RegExp(names.length ? `(@(?:${names.map(esc).join("|")})|${tag})` : `(${tag})`, "gu");
+  return text.split(rx).map((part, i) => {
+    if (!(i % 2)) return part;
+    if (part.startsWith("#")) return <Link key={i} to={`/beranda?tag=${encodeURIComponent(part.slice(1).toLowerCase())}`} className="font-semibold text-sky-600 hover:underline dark:text-sky-400" data-testid={`hashtag-${part.slice(1).toLowerCase()}`}>{part}</Link>;
+    return <span key={i} className="font-semibold text-brand">{part}</span>;
+  });
+}
+
+function Composer({ parentId, onPosted, placeholder, compact = false }) {
+  const { me, users, userMap, t } = useApp();
+  const [text, setText] = useState("");
+  const [files, setFiles] = useState([]);
+  const [mentions, setMentions] = useState([]);
+  const [mq, setMq] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [pollOpen, setPollOpen] = useState(false);
+  const fileRef = useRef(null);
+  const sugg = mq === null ? [] : users.filter((u) => u.user_id !== me.user_id && u.name.toLowerCase().includes(mq)).slice(0, 6);
+  const onChange = (e) => { setText(e.target.value); const m = e.target.value.slice(0, e.target.selectionStart).match(/@([\w]*)$/); setMq(m ? m[1].toLowerCase() : null); };
+  const pick = (u) => { const pos = ta.current.selectionStart; setText(text.slice(0, pos).replace(/@[\w]*$/, `@${u.name} `) + text.slice(pos)); setMentions([...mentions, u.user_id]); setMq(null); ta.current.focus(); };
+  const addFiles = async (list) => {
+    for (const f of Array.from(list).slice(0, 6 - files.length)) {
+      if (!f.type.startsWith("image/")) { toast.error(`${f.name} bukan gambar`); continue; }
+      try { const up = await uploadFile(f); setFiles((x) => [...x, up]); } catch (er) { toast.error(errMsg(er)); }
+    }
+  };
+  const submit = async (poll) => {
+    if (busy || (!poll && !text.trim() && !files.length)) return;
+    setBusy(true);
+    const currentText = text;
+    const currentFiles = [...files];
+    const currentMentions = [...mentions];
+    const tempId = `pst_opt_${Date.now()}`;
+    let optimisticPoll = null;
+    if (poll && poll.question) {
+      const opts = (poll.options || []).filter((x) => String(x || "").trim()).map((opt, idx) => typeof opt === "string" ? { id: `opt_${idx + 1}`, text: opt } : opt);
+      optimisticPoll = {
+        id: `poll_opt_${Date.now()}`,
+        question: poll.question,
+        multiple: !!poll.multiple,
+        anonymous: !!poll.anonymous,
+        allow_change: poll.allow_change !== false,
+        expires_at: poll.expires_at || null,
+        status: "open",
+        options: opts,
+        counts: Object.fromEntries(opts.map((o) => [o.id, 0])),
+        voters: Object.fromEntries(opts.map((o) => [o.id, []])),
+        my_vote: [],
+        total_votes: 0
+      };
+      seedPollCache(optimisticPoll);
+    }
+    const optimisticPost = {
+      id: tempId,
+      author_id: me?.user_id || "user_admin1",
+      text: currentText,
+      poll_id: optimisticPoll?.id || poll?.id || null,
+      poll: optimisticPoll || null,
+      parent_id: parentId || null,
+      attachments: currentFiles.map((f) => ({ id: f.id, name: f.name })),
+      mention_ids: currentMentions.filter((m) => currentText.includes(`@${userMap[m]?.name}`)),
+      likes: [],
+      like_count: 0,
+      liked: false,
+      reactions: {},
+      reply_count: 0,
+      replies_preview: [],
+      created_at: new Date().toISOString()
+    };
+
+    // Optimistically update UI immediately (0ms delay)
+    setText("");
+    setFiles([]);
+    setMentions([]);
+    onPosted?.(optimisticPost);
+
+    try {
+      const { data } = await api.post("/posts", {
+        text: currentText,
+        poll: poll || undefined,
+        parent_id: parentId || null,
+        attachments: currentFiles.map((f) => ({ id: f.id })),
+        mention_ids: currentMentions.filter((m) => currentText.includes(`@${userMap[m]?.name}`))
+      });
+      if (data) {
+        if (data.poll) seedPollCache(data.poll);
+        onPosted?.(data, tempId);
+      }
+    } catch (er) {
+      toast.error(errMsg(er));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const send = () => submit().catch((er) => toast.error(errMsg(er)));
+  const ta = useRef(null);
+  const activePlaceholder = placeholder || (parentId ? t("beranda_reply_btn") : t("beranda_composer_placeholder"));
+  return (
+    <div
+      className={compact ? "relative rounded-2xl border bg-surface p-3 shadow-xs" : "card relative p-4"}
+      data-testid={parentId ? "reply-composer" : "post-composer"}
+    >
+      <div className="flex gap-2.5 sm:gap-3">
+        <Avatar user={me} size={compact ? 32 : 38} showStatus={false} />
+        <div className="min-w-0 flex-1">
+          <textarea
+            ref={ta}
+            value={text}
+            onChange={onChange}
+            onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) send(); }}
+            rows={parentId ? 2 : 3}
+            placeholder={activePlaceholder}
+            className={`w-full resize-none bg-transparent outline-none placeholder:text-sub ${compact ? "text-[14px]" : "text-[15px]"}`}
+            data-testid="post-text-input"
+          />
+          {sugg.length > 0 && (
+            <div className="absolute left-14 z-20 w-64 rounded-xl border bg-surface p-1 shadow-lg" data-testid="post-mention-suggestions">
+              {sugg.map((u) => (
+                <button
+                  key={u.user_id}
+                  onClick={() => pick(u)}
+                  className="flex w-full items-center gap-2 rounded-lg p-1.5 text-sm hover:bg-surface2"
+                  data-testid={`post-mention-${u.user_id}`}
+                >
+                  <Avatar user={u} size={22} showStatus={false} />{u.name}
+                </button>
+              ))}
+            </div>
+          )}
+          {files.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-2">
+              {files.map((f) => (
+                <div key={f.id} className="relative">
+                  <img src={fileUrl(f.id)} alt={f.name} className={`${compact ? "h-16 w-16" : "h-20 w-20"} rounded-xl object-cover`} />
+                  <button
+                    onClick={() => setFiles(files.filter((x) => x.id !== f.id))}
+                    className="absolute -right-1.5 -top-1.5 rounded-full bg-ink p-0.5 text-[var(--c-surface)]"
+                    aria-label="Hapus foto"
+                  >
+                    <X size={11} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="mt-2 flex items-center justify-between border-t pt-2">
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => fileRef.current?.click()}
+                className={`btn-ghost flex items-center gap-1.5 px-2 text-sub ${compact ? "h-8 text-xs font-semibold" : "h-9 text-sm"}`}
+                data-testid="post-add-photo-btn"
+              >
+                <ImagePlus size={compact ? 15 : 17} />Foto
+              </button>
+              {!parentId && (
+                <button
+                  type="button"
+                  onClick={() => setPollOpen(true)}
+                  className="btn-ghost flex h-9 items-center gap-1.5 px-2 text-sm text-sub"
+                  data-testid="post-add-poll-btn"
+                >
+                  <BarChart3 size={17} />Polling
+                </button>
+              )}
+            </div>
+            {!parentId && (
+              <CreatePollDialog
+                open={pollOpen}
+                onOpenChange={setPollOpen}
+                onSubmitPoll={(poll) => submit(poll).then(() => toast.success("Polling diposting"))}
+              />
+            )}
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/*"
+              multiple
+              hidden
+              onChange={(e) => { addFiles(e.target.files); e.target.value = ""; }}
+              data-testid="post-photo-input"
+            />
+            <button
+              type="button"
+              onClick={send}
+              disabled={busy || (!text.trim() && !files.length)}
+              className={`btn-accent rounded-full font-semibold disabled:opacity-40 ${compact ? "h-8 px-4 text-xs" : "h-9 px-5 text-sm"}`}
+              data-testid="post-submit-btn"
+            >
+              {parentId ? "Balas" : t("beranda_post_btn")}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ReactionPicker({ p, onChange }) {
+  const { me } = useApp();
+  const [open, setOpen] = useState(false);
+  const timerRef = useRef(null);
+
+  const clearTimer = () => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+  };
+
+  const handleMouseEnter = () => {
+    clearTimer();
+    setOpen(true);
+  };
+
+  const handleMouseLeave = () => {
+    clearTimer();
+    timerRef.current = setTimeout(() => {
+      setOpen(false);
+    }, 250);
+  };
+
+  useEffect(() => {
+    return () => clearTimer();
+  }, []);
+
+  const react = (emoji) => {
+    setOpen(false);
+    clearTimer();
+    // 100% Optimistic reaction toggle (0ms latency)
+    const currentList = p.reactions?.[emoji] || [];
+    const hasReacted = currentList.includes(me.user_id);
+    const nextList = hasReacted ? currentList.filter((id) => id !== me.user_id) : [...currentList, me.user_id];
+    const nextReactions = { ...(p.reactions || {}) };
+    if (nextList.length) {
+      nextReactions[emoji] = nextList;
+    } else {
+      delete nextReactions[emoji];
+    }
+    const nextP = { ...p, reactions: nextReactions };
+    onChange(nextP);
+
+    if (String(p.id).startsWith("pst_opt_")) return;
+    api.post(`/posts/${p.id}/react`, { emoji }).then((r) => {
+      if (r.data) onChange(r.data);
+    }).catch((e) => {
+      onChange(p);
+      toast.error(errMsg(e));
+    });
+  };
+
+  return (
+    <div
+      className="relative inline-flex items-center"
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
+    >
+      <button
+        type="button"
+        onClick={() => setOpen((prev) => !prev)}
+        className="flex h-8 items-center gap-1.5 rounded-full px-2.5 text-sm text-sub hover:bg-surface2/60 hover:text-ink transition-colors"
+        aria-label="Beri reaksi"
+        data-testid={`post-react-btn-${p.id}`}
+      >
+        <SmilePlus size={16} />
+        <span className="font-medium">React</span>
+      </button>
+
+      {open && (
+        <div
+          role="menu"
+          aria-label="Pilihan reaksi emoji"
+          className="absolute bottom-full left-0 mb-1.5 z-30 flex items-center gap-1 rounded-full border border-subtle bg-surface/95 p-1.5 shadow-xl backdrop-blur-md animate-in fade-in zoom-in-95 duration-150"
+          onMouseEnter={handleMouseEnter}
+          onMouseLeave={handleMouseLeave}
+        >
+          {EMOJIS.map((e) => {
+            const isSelected = (p.reactions?.[e] || []).includes(me.user_id);
+            return (
+              <button
+                key={e}
+                type="button"
+                onClick={() => react(e)}
+                className={`flex h-8 w-8 items-center justify-center rounded-full text-lg transition-transform duration-150 hover:scale-125 hover:bg-surface2 active:scale-95 ${
+                  isSelected ? "bg-accent/15 scale-110" : ""
+                }`}
+                title={`Reaksi ${e}`}
+                data-testid={`post-react-option-${e}`}
+              >
+                {e}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ReactionBadges({ p, onChange }) {
+  const { me } = useApp();
+  const react = (emoji) => {
+    const currentList = p.reactions?.[emoji] || [];
+    const hasReacted = currentList.includes(me.user_id);
+    const nextList = hasReacted ? currentList.filter((id) => id !== me.user_id) : [...currentList, me.user_id];
+    const nextReactions = { ...(p.reactions || {}) };
+    if (nextList.length) {
+      nextReactions[emoji] = nextList;
+    } else {
+      delete nextReactions[emoji];
+    }
+    const nextP = { ...p, reactions: nextReactions };
+    onChange(nextP);
+
+    if (String(p.id).startsWith("pst_opt_")) return;
+    api.post(`/posts/${p.id}/react`, { emoji }).then((r) => {
+      if (r.data) onChange(r.data);
+    }).catch((e) => {
+      onChange(p);
+      toast.error(errMsg(e));
+    });
+  };
+
+  const list = Object.entries(p.reactions || {}).filter(([, ids]) => ids.length);
+  if (!list.length) return null;
+
+  return (
+    <div className="flex flex-wrap items-center gap-1">
+      {list.map(([e, ids]) => (
+        <button
+          key={e}
+          type="button"
+          onClick={() => react(e)}
+          className={`flex h-8 items-center gap-1 rounded-full border px-2.5 text-xs font-semibold transition-colors ${
+            ids.includes(me.user_id) ? "border-[var(--c-accent)] tint-accent" : "text-sub hover:bg-surface2/60"
+          }`}
+          data-testid={`post-reaction-${p.id}-${e}`}
+        >
+          <span>{e}</span>
+          <span>{ids.length}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function PostCard({ p, onChange, onDelete, reply }) {
+  const { me, userMap, isAdmin } = useApp();
+  const author = userMap[p.author_id];
+  const [editing, setEditing] = useState(false);
+  const [editText, setEditText] = useState(p.text || "");
+  const [editFiles, setEditFiles] = useState(p.attachments || []);
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [lightboxImg, setLightboxImg] = useState(null);
+  const editFileRef = useRef(null);
+
+  // Inline comment dropdown state
+  const [showComments, setShowComments] = useState(false);
+  const [replies, setReplies] = useState(p.replies_preview || []);
+  const [loadingReplies, setLoadingReplies] = useState(false);
+  const [hasLoadedFull, setHasLoadedFull] = useState(false);
+
+  useEffect(() => {
+    if (!editing) {
+      setEditText(p.text || "");
+      setEditFiles(p.attachments || []);
+    }
+  }, [p.text, p.attachments, editing]);
+
+  useEffect(() => {
+    if (!hasLoadedFull && Array.isArray(p.replies_preview)) {
+      setReplies((prev) => {
+        if (!prev.length) return p.replies_preview;
+        const prevIds = new Set(prev.map((r) => r.id));
+        const missing = p.replies_preview.filter((r) => !prevIds.has(r.id));
+        return missing.length ? [...prev, ...missing] : prev;
+      });
+    }
+  }, [p.replies_preview, hasLoadedFull]);
+
+  const toggleComments = async (e) => {
+    e?.stopPropagation?.();
+    const nextState = !showComments;
+    setShowComments(nextState);
+
+    if (nextState && !hasLoadedFull && !String(p.id).startsWith("pst_opt_")) {
+      setLoadingReplies(true);
+      try {
+        const { data } = await api.get(`/posts/${p.id}`);
+        if (data && Array.isArray(data.replies)) {
+          setReplies(data.replies);
+          setHasLoadedFull(true);
+        }
+      } catch (err) {
+        setReplies(p.replies_preview || []);
+      } finally {
+        setLoadingReplies(false);
+      }
+    }
+  };
+
+  const handleReplyPosted = useCallback((newReply, replaceId) => {
+    setReplies((prevReplies) => {
+      let nextReplies;
+      if (replaceId) {
+        const idx = prevReplies.findIndex((r) => r.id === replaceId || r.id === newReply.id);
+        if (idx !== -1) {
+          nextReplies = prevReplies.map((r, i) => (i === idx ? newReply : r));
+        } else {
+          nextReplies = [...prevReplies.filter((r) => r.id !== newReply.id && r.id !== replaceId), newReply];
+        }
+      } else {
+        const exists = prevReplies.some((r) => r.id === newReply.id);
+        nextReplies = exists
+          ? prevReplies.map((r) => (r.id === newReply.id ? newReply : r))
+          : [...prevReplies.filter((r) => r.id !== newReply.id), newReply];
+      }
+
+      if (!reply && onChange) {
+        const nextCount = Math.max(p.reply_count || 0, nextReplies.length);
+        const nextPreview = nextReplies.slice(-3);
+        setTimeout(() => {
+          onChange({
+            ...p,
+            reply_count: nextCount,
+            replies_preview: nextPreview,
+          });
+        }, 0);
+      }
+
+      return nextReplies;
+    });
+    setHasLoadedFull(true);
+  }, [reply, onChange, p]);
+
+  const handleReplyChange = useCallback((updatedReply) => {
+    setReplies((prev) => {
+      const nextReplies = prev.map((r) => (r.id === updatedReply.id ? { ...r, ...updatedReply } : r));
+      if (!reply && onChange) {
+        setTimeout(() => {
+          onChange({
+            ...p,
+            replies_preview: nextReplies.slice(-3),
+          });
+        }, 0);
+      }
+      return nextReplies;
+    });
+  }, [reply, onChange, p]);
+
+  const handleReplyDelete = useCallback((deletedId) => {
+    setReplies((prev) => {
+      const nextReplies = prev.filter((r) => r.id !== deletedId);
+      if (!reply && onChange) {
+        setTimeout(() => {
+          onChange({
+            ...p,
+            reply_count: Math.max(0, (p.reply_count || 1) - 1),
+            replies_preview: nextReplies.slice(-3),
+          });
+        }, 0);
+      }
+      return nextReplies;
+    });
+  }, [reply, onChange, p]);
+
+  const del = (e) => {
+    e?.stopPropagation?.();
+    onDelete(p.id);
+    toast.success("Postingan dihapus");
+    if (!String(p.id).startsWith("pst_opt_")) {
+      api.delete(`/posts/${p.id}`).catch((err) => toast.error(errMsg(err)));
+    }
+  };
+
+  const startEdit = (e) => {
+    e?.stopPropagation?.();
+    setEditText(p.text || "");
+    setEditFiles(p.attachments || []);
+    setEditing(true);
+  };
+
+  const addEditFiles = async (list) => {
+    for (const f of Array.from(list).slice(0, 6 - editFiles.length)) {
+      if (!f.type.startsWith("image/")) {
+        toast.error(`${f.name} bukan gambar`);
+        continue;
+      }
+      try {
+        const up = await uploadFile(f);
+        setEditFiles((prev) => [...prev, up]);
+      } catch (er) {
+        toast.error(errMsg(er));
+      }
+    }
+  };
+
+  const saveEdit = async () => {
+    if (!editText.trim() && editFiles.length === 0 && !p.poll_id && !p.poll) {
+      toast.error("Postingan tidak boleh kosong");
+      return;
+    }
+    const prevPost = p;
+    const nextPost = {
+      ...p,
+      text: editText,
+      attachments: editFiles,
+      edited: true,
+      updated_at: new Date().toISOString()
+    };
+    onChange(nextPost);
+    setEditing(false);
+    toast.success("Postingan berhasil diperbarui");
+
+    if (String(p.id).startsWith("pst_opt_")) return;
+    setSavingEdit(true);
+    try {
+      const { data } = await api.patch(`/posts/${p.id}`, {
+        text: editText,
+        attachments: editFiles.map((f) => ({ id: f.id, name: f.name }))
+      });
+      if (data) onChange(data);
+    } catch (er) {
+      onChange(prevPost);
+      toast.error(errMsg(er, "Gagal menyimpan perubahan"));
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
+  return (
+    <article className={`flex gap-3 ${reply ? "py-4" : "card p-4"}`} data-testid={`post-${p.id}`}>
+      <Link to={`/people/${p.author_id}`} className="shrink-0"><Avatar user={author} size={reply ? 34 : 42} /></Link>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-baseline gap-2">
+          <Link to={`/people/${p.author_id}`} className="truncate font-bold hover:underline">{author?.name || "—"}</Link>
+          <span className="shrink-0 text-xs text-sub">
+            {author?.job_title ? `${author.job_title} · ` : ""}{rel(p.created_at)}
+            {p.edited && <span className="ml-1 italic text-sub/80" data-testid={`post-edited-badge-${p.id}`}>(diedit)</span>}
+          </span>
+          {(p.author_id === me?.user_id || isAdmin) && (
+            <div className="ml-auto flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={startEdit}
+                className="flex h-7 w-7 items-center justify-center rounded-lg text-sub hover:bg-surface2 hover:text-ink transition-colors"
+                title="Edit postingan"
+                aria-label="Edit postingan"
+                data-testid={`post-edit-${p.id}`}
+              >
+                <Pencil size={13.5} />
+              </button>
+              <button
+                type="button"
+                onClick={del}
+                className="flex h-7 w-7 items-center justify-center rounded-lg text-sub hover:bg-rose-50 dark:hover:bg-rose-950/30 hover:text-rose-500 transition-colors"
+                title="Hapus postingan"
+                aria-label="Hapus"
+                data-testid={`post-delete-${p.id}`}
+              >
+                <Trash2 size={14} />
+              </button>
+            </div>
+          )}
+        </div>
+
+        {editing ? (
+          <div className="mt-2 rounded-2xl border bg-surface2/70 p-3 space-y-2.5" data-testid={`post-edit-form-${p.id}`}>
+            <textarea
+              value={editText}
+              onChange={(e) => setEditText(e.target.value)}
+              rows={reply ? 2 : 3}
+              placeholder="Edit isi postingan..."
+              className="w-full resize-none rounded-xl border bg-surface p-2.5 text-[14.5px] text-ink outline-none focus:border-brand"
+              data-testid={`post-edit-input-${p.id}`}
+            />
+            {editFiles.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {editFiles.map((f) => (
+                  <div key={f.id} className="relative">
+                    <img src={fileUrl(f.id)} alt={f.name} className="h-16 w-16 rounded-xl object-cover border" />
+                    <button
+                      type="button"
+                      onClick={() => setEditFiles(editFiles.filter((x) => x.id !== f.id))}
+                      className="absolute -right-1.5 -top-1.5 rounded-full bg-ink p-0.5 text-[var(--c-surface)]"
+                      aria-label="Hapus lampiran"
+                    >
+                      <X size={11} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="flex items-center justify-between gap-2 pt-1">
+              <div>
+                <button
+                  type="button"
+                  onClick={() => editFileRef.current?.click()}
+                  className="btn-ghost inline-flex h-8 items-center gap-1.5 px-2.5 text-xs font-semibold text-sub hover:text-ink"
+                >
+                  <ImagePlus size={14} /> Tambah Foto
+                </button>
+                <input
+                  ref={editFileRef}
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  hidden
+                  onChange={(e) => {
+                    addEditFiles(e.target.files);
+                    e.target.value = "";
+                  }}
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setEditing(false)}
+                  className="h-8 rounded-full border bg-surface px-3.5 text-xs font-semibold text-sub hover:text-ink"
+                  data-testid={`post-edit-cancel-${p.id}`}
+                >
+                  Batal
+                </button>
+                <button
+                  type="button"
+                  disabled={savingEdit}
+                  onClick={saveEdit}
+                  className="btn-accent inline-flex h-8 items-center gap-1 rounded-full px-4 text-xs font-semibold text-white disabled:opacity-50"
+                  data-testid={`post-edit-save-${p.id}`}
+                >
+                  <Check size={13} /> Simpan Perubahan
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <>
+            {p.text && <p className="mt-1 whitespace-pre-wrap break-words text-[15px] leading-relaxed" data-testid={`post-text-${p.id}`}><RichText text={p.text} mentionIds={p.mention_ids} /></p>}
+            {p.attachments?.length > 0 && (
+              <div className={`mt-2.5 grid gap-1.5 ${p.attachments.length > 1 ? "grid-cols-2" : "grid-cols-1"}`}>
+                {p.attachments.map((a) => (
+                  <button
+                    key={a.id}
+                    type="button"
+                    onClick={() => setLightboxImg(a)}
+                    className="group relative overflow-hidden rounded-2xl border text-left focus:outline-none cursor-zoom-in w-fit max-w-full"
+                    data-testid={`post-image-${a.id}`}
+                  >
+                    <img
+                      src={fileUrl(a.id)}
+                      alt={a.name}
+                      className={`object-cover transition-transform duration-200 group-hover:scale-[1.01] ${p.attachments.length > 1 ? "aspect-square w-full" : "max-h-[420px] w-auto max-w-full"}`}
+                    />
+                  </button>
+                ))}
+              </div>
+            )}
+          </>
+        )}
+
+        {(p.poll_id || p.poll) && <div className="mt-2.5"><PollCard pollId={p.poll_id || p.poll?.id} poll={p.poll} compact /></div>}
+        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          <ReactionPicker p={p} onChange={onChange} />
+          {!reply && (
+            <button
+              type="button"
+              onClick={toggleComments}
+              className={`flex h-8 items-center gap-1.5 rounded-full px-2.5 text-sm transition-all duration-150 ${
+                showComments
+                  ? "bg-brand/10 text-brand font-semibold ring-1 ring-brand/25"
+                  : "text-sub hover:bg-surface2/60 hover:text-ink"
+              }`}
+              data-testid={`post-reply-btn-${p.id}`}
+              title={showComments ? "Tutup kolom balasan" : "Balas postingan"}
+            >
+              <MessageCircle size={16} />
+              <span>{p.reply_count > 0 ? `${p.reply_count} Balas` : "Balas"}</span>
+              {showComments && <ChevronUp size={13} className="ml-0.5 opacity-70" />}
+            </button>
+          )}
+          <ReactionBadges p={p} onChange={onChange} />
+        </div>
+
+        {/* Collapsed comments indicator */}
+        {!reply && !showComments && p.reply_count > 0 && (
+          <div className="mt-2.5">
+            <button
+              type="button"
+              onClick={toggleComments}
+              className="group inline-flex items-center gap-1.5 text-xs font-semibold text-brand hover:underline"
+              data-testid={`post-expand-comments-${p.id}`}
+            >
+              <MessageCircle size={13} />
+              <span>Lihat {p.reply_count} balasan</span>
+              <ChevronDown size={13} className="transition-transform group-hover:translate-y-0.5" />
+            </button>
+          </div>
+        )}
+
+        {/* Inline comments & reply dropdown */}
+        {!reply && (
+          <div
+            className={`grid transition-[grid-template-rows,opacity] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] ${
+              showComments
+                ? "grid-rows-[1fr] opacity-100 mt-3"
+                : "grid-rows-[0fr] opacity-0 mt-0 pointer-events-none"
+            }`}
+            data-testid={`post-comments-dropdown-${p.id}`}
+          >
+            <div className="overflow-hidden">
+              <div className="space-y-3 rounded-2xl bg-surface2/35 p-3 sm:p-3.5">
+                <div className="flex items-center justify-between text-xs font-semibold text-sub px-0.5">
+                  <span>{replies.length > 0 ? `${replies.length} balasan` : "0 balasan"}</span>
+                  <button
+                    type="button"
+                    onClick={() => setShowComments(false)}
+                    className="flex items-center gap-1 text-xs text-sub hover:text-ink rounded-lg px-2 py-0.5 hover:bg-surface2 transition-colors"
+                    title="Tutup kolom balasan"
+                  >
+                    <span>Tutup</span>
+                    <ChevronUp size={13} />
+                  </button>
+                </div>
+
+                {loadingReplies ? (
+                  <div className="flex items-center justify-center py-6 text-xs text-sub gap-2">
+                    <Loader2 size={16} className="animate-spin text-brand" />
+                    <span>Memuat balasan...</span>
+                  </div>
+                ) : replies.length > 0 ? (
+                  <div className="divide-y divide-subtle/60 rounded-xl bg-surface px-3 border border-subtle/50">
+                    {replies.map((r) => (
+                      <PostCard
+                        key={r.id}
+                        p={r}
+                        reply
+                        onChange={handleReplyChange}
+                        onDelete={handleReplyDelete}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <div className="py-2.5 text-center text-xs text-sub">
+                    Belum ada balasan. Tulis balasan pertama di bawah!
+                  </div>
+                )}
+
+                <Composer
+                  parentId={p.id}
+                  compact
+                  placeholder="Balas postingan ini..."
+                  onPosted={handleReplyPosted}
+                />
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+      <ImageLightbox image={lightboxImg} onClose={() => setLightboxImg(null)} />
+    </article>
+  );
+}
+
+const DEFAULT_TRENDING = [
+  { tag: "welcome", count: 1 },
+  { tag: "update", count: 1 }
+];
+
+const DEFAULT_POSTS = [
+  {
+    id: "pst_init_1",
+    author_id: "user_admin1",
+    text: "Selamat datang di workspace internal ASLI RI! 🎉 Silakan gunakan Beranda ini untuk update info, obrolan santai, atau diskusi lintas divisi. Jangan ragu menyematkan #welcome dan #update.",
+    attachments: [],
+    likes: [],
+    like_count: 0,
+    liked: false,
+    reactions: { "👍": ["user_admin1"] },
+    reply_count: 0,
+    replies_preview: [],
+    created_at: new Date(Date.now() - 3600000 * 24).toISOString()
+  }
+];
+
+let TRENDING_CACHE = DEFAULT_TRENDING;
+try {
+  const saved = localStorage.getItem("circle_cache_trending");
+  if (saved) {
+    const parsed = JSON.parse(saved);
+    if (Array.isArray(parsed) && parsed.length > 0) TRENDING_CACHE = parsed;
+  }
+} catch {}
+
+let POSTS_CACHE = DEFAULT_POSTS;
+try {
+  const saved = localStorage.getItem("circle_cache_posts_feed");
+  if (saved) {
+    const parsed = JSON.parse(saved);
+    if (Array.isArray(parsed) && parsed.length > 0) POSTS_CACHE = parsed;
+  }
+} catch {}
+
+const THREAD_CACHE = {};
+
+export function hydratePostsCache(posts, trending) {
+  if (Array.isArray(posts)) {
+    POSTS_CACHE = posts;
+    posts.forEach((p) => {
+      if (p?.poll) seedPollCache(p.poll);
+    });
+    try { localStorage.setItem("circle_cache_posts_feed", JSON.stringify(posts)); } catch {}
+  }
+  if (Array.isArray(trending)) {
+    TRENDING_CACHE = trending;
+    try { localStorage.setItem("circle_cache_trending", JSON.stringify(trending)); } catch {}
+  }
+}
+
+function Trending({ compact }) {
+  const { subscribe } = useApp();
+  const [items, setItems] = useState(TRENDING_CACHE);
+  const [params] = useSearchParams();
+  const active = params.get("tag");
+
+  const load = useCallback(() => {
+    api.get("/posts/trending")
+      .then((r) => {
+        if (Array.isArray(r.data)) {
+          setItems(r.data);
+          TRENDING_CACHE = r.data;
+          try { localStorage.setItem("circle_cache_trending", JSON.stringify(r.data)); } catch {}
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+  useEffect(() => subscribe((e) => {
+    if (Array.isArray(e.trending)) {
+      TRENDING_CACHE = e.trending;
+      setItems(e.trending);
+      try { localStorage.setItem("circle_cache_trending", JSON.stringify(e.trending)); } catch {}
+    } else if (e.type === "posts:changed") {
+      load();
+    }
+  }), [subscribe, load]);
+
+  const displayItems = items || [];
+
+  if (compact) {
+    if (!displayItems.length) return null;
+    return (
+      <div className="flex flex-wrap items-center gap-1.5" data-testid="trending-compact">
+        <TrendingUp size={15} className="text-brand" />
+        {displayItems.slice(0, 6).map((t) => (
+          <Link
+            key={t.tag}
+            to={`/beranda?tag=${t.tag}`}
+            className={`rounded-full border px-2.5 py-1 text-xs font-semibold transition-colors ${
+              active === t.tag ? "border-brand bg-brand text-white shadow-xs" : "bg-surface hover:bg-surface2"
+            }`}
+          >
+            #{t.tag}
+          </Link>
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <div className="card p-4" data-testid="trending-panel">
+      <h3 className="flex items-center gap-2 font-bold text-ink">
+        <TrendingUp size={17} className="text-brand" />
+        Trending
+      </h3>
+      <p className="mb-3 text-xs text-sub">Hashtag paling ramai 7 hari terakhir</p>
+
+      {!displayItems.length ? (
+        <p className="text-sm text-sub" data-testid="trending-empty">
+          Belum ada hashtag. Coba tulis #namatopik di postinganmu.
+        </p>
+      ) : (
+        <ol className="space-y-0.5">
+          {displayItems.map((t, i) => (
+            <li key={t.tag}>
+              <Link
+                to={`/beranda?tag=${t.tag}`}
+                className={`flex items-center gap-3 rounded-xl px-2.5 py-2 transition-colors hover:bg-surface2 ${
+                  active === t.tag ? "bg-surface2" : ""
+                }`}
+                data-testid={`trending-tag-${t.tag}`}
+              >
+                <span className="w-4 text-xs font-bold text-sub">{i + 1}</span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate font-semibold text-ink">#{t.tag}</span>
+                  <span className="text-xs text-sub">{t.count} postingan</span>
+                </span>
+              </Link>
+            </li>
+          ))}
+        </ol>
+      )}
+    </div>
+  );
+}
+
+function Feed() {
+  const { me, subscribe } = useApp();
+  const [params, setParams] = useSearchParams();
+  const tag = params.get("tag") || "";
+  const [posts, setPosts] = useState(() =>
+    tag ? POSTS_CACHE.filter((p) => (p.text || "").toLowerCase().includes(`#${tag.toLowerCase()}`)) : POSTS_CACHE
+  );
+  const [more, setMore] = useState(POSTS_CACHE.length >= 30);
+
+  const load = useCallback(() => {
+    api.get("/posts", { params: tag ? { tag } : {} })
+      .then((r) => {
+        if (Array.isArray(r.data)) {
+          r.data.forEach((p) => { if (p?.poll) seedPollCache(p.poll); });
+          setPosts(r.data);
+          setMore(r.data.length === 30);
+          if (!tag) {
+            POSTS_CACHE = r.data;
+            try { localStorage.setItem("circle_cache_posts_feed", JSON.stringify(r.data)); } catch {}
+          }
+        }
+      })
+      .catch(() => {});
+  }, [tag]);
+
+  useEffect(() => {
+    if (tag) {
+      setPosts(POSTS_CACHE.filter((p) => (p.text || "").toLowerCase().includes(`#${tag.toLowerCase()}`)));
+    } else {
+      setPosts(POSTS_CACHE);
+    }
+    load();
+  }, [tag, load]);
+
+  useEffect(() => subscribe((e) => {
+    if (e.type === "post:new" && e.data) {
+      const d = e.data;
+      if (d.poll) seedPollCache(d.poll);
+      if (!d.parent_id) {
+        if (tag && !(d.text || "").toLowerCase().includes(`#${tag.toLowerCase()}`)) return;
+        setPosts((ps) => {
+          const existing = Array.isArray(ps) ? ps : [];
+          if (existing.some((x) => x.id === d.id)) return existing;
+          // Replace optimistic post by same author if present
+          const optIdx = existing.findIndex((x) => String(x.id).startsWith("pst_opt_") && x.author_id === d.author_id && x.text === d.text);
+          const next = optIdx !== -1
+            ? existing.map((x, idx) => (idx === optIdx ? d : x))
+            : [d, ...existing];
+          if (!tag) {
+            POSTS_CACHE = next;
+            try { localStorage.setItem("circle_cache_posts_feed", JSON.stringify(next)); } catch {}
+          }
+          return next;
+        });
+      } else if (d.parent_id) {
+        setPosts((ps) => {
+          const next = (Array.isArray(ps) ? ps : []).map((x) => {
+            if (x.id === d.parent_id) {
+              const prevReplies = x.replies_preview || [];
+              const exists = prevReplies.some((r) => r.id === d.id);
+              const nextReplies = exists ? prevReplies.map((r) => (r.id === d.id ? d : r)) : [...prevReplies, d];
+              return {
+                ...x,
+                reply_count: Math.max(x.reply_count || 0, nextReplies.length),
+                replies_preview: nextReplies.slice(-3)
+              };
+            }
+            return x;
+          });
+          if (!tag) {
+            POSTS_CACHE = next;
+            try { localStorage.setItem("circle_cache_posts_feed", JSON.stringify(next)); } catch {}
+          }
+          return next;
+        });
+      } else if (e.parent) {
+        setPosts((ps) => {
+          const next = (Array.isArray(ps) ? ps : []).map((x) => (x.id === e.parent.id ? { ...x, ...e.parent } : x));
+          if (!tag) {
+            POSTS_CACHE = next;
+            try { localStorage.setItem("circle_cache_posts_feed", JSON.stringify(next)); } catch {}
+          }
+          return next;
+        });
+      }
+    } else if (e.type === "post:updated" && e.data) {
+      const d = e.data;
+      const withMyLike = {
+        ...d,
+        liked: Boolean(me?.user_id && Array.isArray(d.likes) && d.likes.includes(me.user_id))
+      };
+      setPosts((ps) => {
+        const next = (Array.isArray(ps) ? ps : []).map((x) => {
+          if (x.id === withMyLike.id) return { ...x, ...withMyLike };
+          if (Array.isArray(x.replies_preview) && x.replies_preview.some((r) => r.id === withMyLike.id)) {
+            return {
+              ...x,
+              replies_preview: x.replies_preview.map((r) => (r.id === withMyLike.id ? { ...r, ...withMyLike } : r))
+            };
+          }
+          return x;
+        });
+        if (!tag) {
+          POSTS_CACHE = next;
+          try { localStorage.setItem("circle_cache_posts_feed", JSON.stringify(next)); } catch {}
+        }
+        return next;
+      });
+    } else if (e.type === "post:deleted" && e.id) {
+      setPosts((ps) => {
+        let next = (Array.isArray(ps) ? ps : []).filter((x) => x.id !== e.id);
+        if (e.parent) {
+          next = next.map((x) => (x.id === e.parent.id ? { ...x, ...e.parent } : x));
+        }
+        if (!tag) {
+          POSTS_CACHE = next;
+          try { localStorage.setItem("circle_cache_posts_feed", JSON.stringify(next)); } catch {}
+        }
+        return next;
+      });
+    } else if (e.type === "posts:changed") {
+      load();
+    }
+  }), [subscribe, load, tag, me?.user_id]);
+
+  const older = () =>
+    api.get("/posts", { params: { before: posts[posts.length - 1]?.created_at, ...(tag ? { tag } : {}) } })
+      .then((r) => {
+        setPosts([...posts, ...r.data]);
+        setMore(r.data.length === 30);
+      });
+
+  const upd = (np) => {
+    setPosts((ps) => {
+      const next = ps.map((x) => (x.id === np.id ? { ...x, ...np } : x));
+      if (!tag) {
+        POSTS_CACHE = next;
+        try { localStorage.setItem("circle_cache_posts_feed", JSON.stringify(next)); } catch {}
+      }
+      return next;
+    });
+  };
+
+  const handlePosted = (newPost, replaceId) => {
+    setPosts((ps) => {
+      const existing = ps || [];
+      let next;
+      if (replaceId) {
+        next = existing.map((x) => (x.id === replaceId ? newPost : x));
+      } else {
+        next = [newPost, ...existing.filter((x) => x.id !== newPost.id)];
+      }
+      if (!tag) {
+        POSTS_CACHE = next;
+        try { localStorage.setItem("circle_cache_posts_feed", JSON.stringify(next)); } catch {}
+      }
+      return next;
+    });
+  };
+
+  return (
+    <>
+      <PageHeader icon={Newspaper} title="Beranda" subtitle="Tempat berbagi kabar, ide, dan obrolan santai bareng semua orang di Internal." />
+      <div className="space-y-4">
+        <div className="lg:hidden"><Trending compact /></div>
+        {tag && (
+          <div className="flex items-center gap-2 rounded-2xl bg-soft-blue px-4 py-3" data-testid="active-tag-filter">
+            <Hash size={16} />
+            <span className="flex-1 text-sm">Menampilkan postingan dengan <b>#{tag}</b></span>
+            <button
+              onClick={() => { params.delete("tag"); setParams(params); }}
+              className="flex items-center gap-1 text-sm font-semibold"
+              data-testid="clear-tag-filter"
+            >
+              <X size={14} />Hapus filter
+            </button>
+          </div>
+        )}
+        <Composer onPosted={handlePosted} />
+        {!posts.length ? (
+          <p className="py-10 text-center text-sm text-sub" data-testid="feed-empty">
+            {tag ? `Belum ada postingan dengan #${tag}.` : "Belum ada postingan. Jadilah yang pertama!"}
+          </p>
+        ) : (
+          posts.map((p) => (
+            <PostCard
+              key={p.id}
+              p={p}
+              onChange={upd}
+              onDelete={(id) => {
+                setPosts((ps) => {
+                  const next = ps.filter((x) => x.id !== id);
+                  if (!tag) {
+                    POSTS_CACHE = next;
+                    try { localStorage.setItem("circle_cache_posts_feed", JSON.stringify(next)); } catch {}
+                  }
+                  return next;
+                });
+              }}
+            />
+          ))
+        )}
+        {posts?.length > 0 && more && (
+          <button onClick={older} className="w-full py-3 text-sm font-semibold text-brand hover:underline" data-testid="feed-load-more">
+            Muat lebih banyak
+          </button>
+        )}
+      </div>
+    </>
+  );
+}
+
+function Thread({ pid }) {
+  const { me, subscribe } = useApp();
+  const navigate = useNavigate();
+  const getInitialThread = (id) => {
+    if (THREAD_CACHE[id]) return THREAD_CACHE[id];
+    const cached = POSTS_CACHE.find((x) => x.id === id);
+    if (cached) {
+      return {
+        ...cached,
+        replies: Array.isArray(cached.replies) ? cached.replies : (cached.replies_preview || [])
+      };
+    }
+    return null;
+  };
+  const [t, setT] = useState(() => getInitialThread(pid));
+  const load = useCallback(() =>
+    api.get(`/posts/${pid}`).then((r) => {
+      if (r.data) {
+        if (r.data.poll) seedPollCache(r.data.poll);
+        THREAD_CACHE[pid] = r.data;
+        setT(r.data);
+      }
+    }).catch(() => setT((prev) => prev || false)),
+  [pid]);
+
+  useEffect(() => {
+    const cached = getInitialThread(pid);
+    if (cached) setT(cached);
+    load();
+  }, [pid, load]);
+
+  useEffect(() => subscribe((e) => {
+    if (e.type === "post:new" && e.data?.parent_id === pid) {
+      setT((prev) => {
+        if (!prev) return prev;
+        const existing = Array.isArray(prev.replies) ? prev.replies : [];
+        if (existing.some((r) => r.id === e.data.id)) return prev;
+        const optIdx = existing.findIndex((r) => String(r.id).startsWith("pst_opt_") && r.author_id === e.data.author_id && r.text === e.data.text);
+        const nextReplies = optIdx !== -1
+          ? existing.map((r, i) => (i === optIdx ? e.data : r))
+          : [...existing, e.data];
+        const next = { ...prev, reply_count: nextReplies.length, replies: nextReplies };
+        THREAD_CACHE[pid] = next;
+        return next;
+      });
+    } else if (e.type === "post:updated" && e.data) {
+      const d = {
+        ...e.data,
+        liked: Boolean(me?.user_id && Array.isArray(e.data.likes) && e.data.likes.includes(me.user_id))
+      };
+      setT((prev) => {
+        if (!prev) return prev;
+        if (prev.id === d.id) {
+          const next = { ...prev, ...d };
+          THREAD_CACHE[pid] = next;
+          return next;
+        }
+        const nextReplies = (prev.replies || []).map((r) => (r.id === d.id ? { ...r, ...d } : r));
+        const next = { ...prev, replies: nextReplies };
+        THREAD_CACHE[pid] = next;
+        return next;
+      });
+    } else if (e.type === "post:deleted") {
+      if (e.id === pid) {
+        navigate("/beranda");
+      } else if (e.parent_id === pid) {
+        setT((prev) => {
+          if (!prev) return prev;
+          const nextReplies = (prev.replies || []).filter((r) => r.id !== e.id);
+          const next = { ...prev, reply_count: nextReplies.length, replies: nextReplies };
+          THREAD_CACHE[pid] = next;
+          return next;
+        });
+      }
+    } else if (e.type === "posts:changed") {
+      load();
+    }
+  }), [subscribe, load, pid, me?.user_id, navigate]);
+
+  if (!t) return <p className="py-10 text-center text-sm text-sub">Postingan tidak ditemukan.</p>;
+  const replies = t.replies || [];
+  const updReply = (np) => setT((prev) => {
+    const next = { ...prev, replies: (prev.replies || []).map((r) => (r.id === np.id ? { ...r, ...np } : r)) };
+    THREAD_CACHE[pid] = next;
+    return next;
+  });
+  return (
+    <div className="space-y-4" data-testid="post-thread">
+      <button onClick={() => navigate("/beranda")} className="flex items-center gap-1.5 text-sm font-semibold text-sub hover:text-ink" data-testid="thread-back-btn"><ArrowLeft size={16} />Beranda</button>
+      <PostCard p={t} onChange={(np) => setT((prev) => { const next = { ...prev, ...np }; THREAD_CACHE[pid] = next; return next; })} onDelete={() => navigate("/beranda")} />
+      <div className="card px-4" data-testid="thread-replies">
+        <p className="border-b py-3 text-sm font-bold">{replies.length} balasan</p>
+        <div className="divide-y">{replies.map((r) => <PostCard key={r.id} p={r} reply onChange={updReply} onDelete={(id) => setT((prev) => { const nextReplies = (prev.replies || []).filter((x) => x.id !== id); const next = { ...prev, reply_count: nextReplies.length, replies: nextReplies }; THREAD_CACHE[pid] = next; return next; })} />)}</div>
+        {!replies.length && <p className="py-6 text-center text-sm text-sub">Belum ada balasan.</p>}
+      </div>
+      <Composer
+        parentId={t.id}
+        placeholder="Balas postingan ini…"
+        onPosted={(r, replaceId) => {
+          setT((x) => {
+            const existing = x.replies || [];
+            const nextReplies = replaceId
+              ? existing.map((y) => (y.id === replaceId ? r : y))
+              : [...existing.filter((y) => y.id !== r.id), r];
+            const next = { ...x, reply_count: nextReplies.length, replies: nextReplies, replies_preview: nextReplies.slice(-3) };
+            THREAD_CACHE[pid] = next;
+            POSTS_CACHE = POSTS_CACHE.map((p) => (p.id === pid ? { ...p, reply_count: nextReplies.length, replies_preview: nextReplies.slice(-3) } : p));
+            try { localStorage.setItem("circle_cache_posts_feed", JSON.stringify(POSTS_CACHE)); } catch {}
+            return next;
+          });
+        }}
+      />
+    </div>
+  );
+}
+
+export default function Beranda() {
+  const { pid } = useParams();
+  return (
+    <div className="mx-auto max-w-5xl px-4 py-6 sm:px-6 lg:py-10 animate-crossfade" data-testid="beranda-page">
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_280px]">
+        <div className="min-w-0">{pid ? <Thread pid={pid} /> : <Feed />}</div>
+        <aside className="hidden lg:block"><div className="sticky top-6"><Trending /></div></aside>
+      </div>
+    </div>
+  );
+}
+
